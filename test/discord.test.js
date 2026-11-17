@@ -25,9 +25,9 @@ test('組出 Discord embed，並停用 @everyone 等提及', () => {
   const [embed] = payload.embeds;
   assert.equal(embed.title, '【新公告】11/17（二）Artale World 更新公告');
   assert.equal(embed.url, announcement.url);
-  assert.equal(embed.description, `摘要內容\n\n官網公告內文：${announcement.url}`);
+  assert.equal(embed.description, '摘要內容');
   assert.equal(embed.timestamp, '2026-11-17T00:13:00.000Z');
-  assert.deepEqual(embed.image, { url: announcement.thumbnail });
+  assert.equal(embed.image, undefined);
 });
 
 test('公告更新使用不同標籤', () => {
@@ -38,7 +38,7 @@ test('公告更新使用不同標籤', () => {
 test('過長的摘要會被截斷在 Discord 限制內', () => {
   const [embed] = buildDiscordPayload(announcement, '字'.repeat(5000), 'new').embeds;
   assert.equal(embed.description.length, 4096);
-  assert.ok(embed.description.endsWith(`…\n\n官網公告內文：${announcement.url}`));
+  assert.ok(embed.description.endsWith('…'));
 });
 
 const shopAnnouncement = {
@@ -53,13 +53,14 @@ test('文字摘要使用單張卡片，購物商場資料使用多張卡片', ()
   assert.equal(messages[0].embeds.length, 2);
 });
 
-test('更新與購物商場各自產生一則訊息，最後附上各自的官網公告內文網址', () => {
+test('更新與購物商場各自產生一則訊息，公告網址只放在標題', () => {
   const updateMessages = buildDiscordMessages(announcement, '版本更新內容', 'new');
   const shopMessages = buildDiscordMessages(shopAnnouncement, { products: [product('通行證')], otherChanges: [] }, 'new');
   const messages = [...updateMessages, ...shopMessages];
   assert.equal(messages.length, 2);
-  assert.ok(messages[0].embeds.at(-1).description.endsWith(`官網公告內文：${announcement.url}`));
-  assert.ok(messages[1].embeds.at(-1).description.endsWith(`官網公告內文：${shopAnnouncement.url}`));
+  assert.equal(messages[0].embeds[0].url, announcement.url);
+  assert.equal(messages[1].embeds[0].url, shopAnnouncement.url);
+  assert.ok(messages.every(({ embeds }) => embeds.every(e => !e.description?.includes('官網公告內文：'))));
   assert.ok(!JSON.stringify(messages[0]).includes(shopAnnouncement.url));
   assert.ok(!JSON.stringify(messages[1]).includes(announcement.url));
 });
@@ -85,6 +86,7 @@ test('購物商場：每個商品先圖片卡片、再文字卡片，最後是�
   const [header, passImage, passText, giftText, others] = message.embeds;
   assert.equal(header.title, '【新公告】11/17（二）Artale World 購物商場更新公告');
   assert.equal(header.description, undefined);
+  assert.equal(header.image, undefined);
   assert.deepEqual(passImage.image, { url: 'https://cdn.example/pass.webp' });
   assert.equal(passImage.title, undefined);
   assert.equal(passText.title, '每週突襲重置獎勵通行證｜4,000 WC');
@@ -96,7 +98,7 @@ test('購物商場：每個商品先圖片卡片、再文字卡片，最後是�
   assert.equal(giftText.image, undefined);
   assert.equal(giftText.description, '內容物：突襲額外入場券、凍結加持器');
   assert.equal(others.title, '其他異動');
-  assert.equal(others.description, `- 常駐禮包價格調整\n\n官網公告內文：${shopAnnouncement.url}`);
+  assert.equal(others.description, '- 常駐禮包價格調整');
 });
 
 test('購物商場公告內容被修改時，公告卡片註明（公告已更新）', () => {
@@ -112,7 +114,7 @@ test('購物商場：購買資訊只顯示有內容的項目並放在連結後�
   };
   const [{ embeds }] = buildShopMessages(shopAnnouncement, { products: [item], otherChanges: [] }, 'new');
   assert.equal(embeds[1].description,
-    `內容物：突襲額外入場券、凍結加持器\n[說明](https://artale.live/tw/guide/pass)\n販售時間：11/17～11/24\n\n官網公告內文：${shopAnnouncement.url}`);
+    '內容物：突襲額外入場券、凍結加持器\n[說明](https://artale.live/tw/guide/pass)\n販售時間：11/17～11/24');
 });
 
 test('購物商場：超過 10 張卡片時拆成多則訊息，且同一商品的圖片與文字不會被拆開', () => {
@@ -130,10 +132,9 @@ test('購物商場：超過 10 張卡片時拆成多則訊息，且同一商品�
       if (embed.image && !embed.title) assert.match(embeds[i + 1].title, /^禮包\d｜/);
     });
   }
-  assert.ok(messages.at(-1).embeds.at(-1).description.endsWith(`官網公告內文：${shopAnnouncement.url}`));
   const sourceCount = messages.flatMap(({ embeds }) => embeds)
     .filter(({ description }) => description?.includes('官網公告內文：')).length;
-  assert.equal(sourceCount, 1);
+  assert.equal(sourceCount, 0);
 });
 
 test('購物商場：文字總量超過 6000 字時也會拆成多則訊息', () => {
@@ -160,12 +161,13 @@ test('購物商場：內容物過長時仍在卡片最後保留購買資訊', ()
   const [{ embeds }] = buildShopMessages(shopAnnouncement, { products: [item], otherChanges: [] }, 'new');
   const description = embeds[1].description;
   assert.ok(description.length <= 4096);
-  assert.ok(description.endsWith(`購買條件：角色等級 70 以上\n可購買次數：每帳號每週限購 1 次\n販售時間：11/17 維護後～11/24 維護前\n\n官網公告內文：${shopAnnouncement.url}`));
+  assert.ok(description.endsWith('購買條件：角色等級 70 以上\n可購買次數：每帳號每週限購 1 次\n販售時間：11/17 維護後～11/24 維護前'));
 });
 
-test('購物商場只有其他異動時，仍在最後保留完整官網內文網址', () => {
+test('購物商場只有其他異動時，截斷內文並保留標題連結', () => {
   const [{ embeds }] = buildShopMessages(shopAnnouncement, { products: [], otherChanges: ['調整'.repeat(3000)] }, 'updated');
   assert.equal(embeds.length, 2);
   assert.equal(embeds[1].description.length, 4096);
-  assert.ok(embeds[1].description.endsWith(`…\n\n官網公告內文：${shopAnnouncement.url}`));
+  assert.ok(embeds[1].description.endsWith('…'));
+  assert.equal(embeds[0].url, shopAnnouncement.url);
 });
