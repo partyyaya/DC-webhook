@@ -12,6 +12,7 @@
     "start": "node src/index.js",
     "dry-run": "node src/index.js --dry-run",
     "schedule": "node src/scheduler.js",
+    "webhook": "node src/webhook.js",
     "test": "node --test"
   }
 }

@@ -1,20 +1,18 @@
 /**
  * 設定模組：負責讀取 .env 檔與環境變數，整理成全專案共用的 config 物件。
- * 其他模組一律從這裡取得設定，不直接讀 process.env。
+ * 公告流程從這裡取得設定；手動 Webhook 入口只讀取自己的必要設定。
  */
-import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { parseCategories } from './artale.js';
 import { createSchedule } from './schedule.js';
+import { loadProjectEnv, ROOT_DIR } from './env.js';
 
 // 專案根目錄（src 的上一層），用來組出 .env 與狀態檔的絕對路徑，
 // 這樣不論從哪個目錄執行（例如 cron），路徑都不會跑掉。
-export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+export { ROOT_DIR };
 
 // 若專案根目錄有 .env 檔就載入；系統環境變數中已存在的同名設定會優先，不會被 .env 覆蓋。
-const envFile = path.join(ROOT_DIR, '.env');
-if (existsSync(envFile)) process.loadEnvFile(envFile);
+loadProjectEnv();
 
 /**
  * 讀取一個「正整數」型態的環境變數。
@@ -42,6 +40,8 @@ export const config = {
   discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL || '',
   // 已發送公告版本的紀錄檔，相對路徑以專案根目錄為準
   stateFile: path.resolve(ROOT_DIR, process.env.STATE_FILE || 'data/state.json'),
+  // 每則 Discord 訊息的新增、修改、刪除紀錄，與公告去重紀錄分開儲存
+  discordMessagesFile: path.resolve(ROOT_DIR, process.env.DISCORD_MESSAGES_FILE || 'data/discord-messages.jsonl'),
   // 抓官網與呼叫 Discord 時，每個 HTTP 請求的逾時時間
   httpTimeoutMs: 30_000,
   // Codex CLI 相關設定：執行檔、模型、逾時時間

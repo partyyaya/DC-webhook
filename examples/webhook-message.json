@@ -1,0 +1,13 @@
+{
+  "content": "",
+  "embeds": [
+    {
+      "title": "公告測試",
+      "description": "請將這裡改成要發布的內容。",
+      "color": 16750848
+    }
+  ],
+  "allowed_mentions": {
+    "parse": []
+  }
+}

@@ -18,7 +18,8 @@
  */
 import { categoryUrl, fetchLatestAnnouncement, NEWS_CATEGORIES } from './artale.js';
 import { config } from './config.js';
-import { buildDiscordMessages, sendToDiscord } from './discord.js';
+import { buildDiscordMessages } from './discord.js';
+import { managePost } from './posts.js';
 import { ContentParseError } from './errors.js';
 import { log, logError } from './log.js';
 import { detectChange, hashAnnouncement, loadState, recordNotified, saveState } from './state.js';
@@ -139,7 +140,12 @@ async function notifyIfChanged({ category, label, announcement }, state, { dryRu
 
   // 步驟 4：依序發送到 Discord；發送失敗會拋錯，不會執行下面的紀錄步驟，下次檢查會重試
   for (const payload of messages) {
-    await sendToDiscord(config.discordWebhookUrl, payload, { timeoutMs: config.httpTimeoutMs });
+    const post = await managePost('create', config.discordWebhookUrl, {
+      payload, historyFile: config.discordMessagesFile,
+      metadata: { announcementId: announcement.id, category, title: announcement.title },
+      requestOptions: { timeoutMs: config.httpTimeoutMs },
+    });
+    say(`Discord 訊息 ID：${post.messageId}`);
   }
 
   // 步驟 5：發送成功或沒有需通知的內容時記錄此版本，避免重複通知或每次重新摘要

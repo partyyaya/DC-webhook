@@ -7,6 +7,7 @@
 - [快速開始](#快速開始)
 - [Discord 發布內容](#discord-發布內容)
 - [預覽與手動操作](#預覽與手動操作)
+- [管理 Discord 發文](#管理-discord-發文)
 - [自動排程](#自動排程)
 - [設定參考](#設定參考)
 - [問題排查](#問題排查)
@@ -149,6 +150,57 @@ ARTALE_NEWS_CATEGORIES=update npm run dry-run -- --force
 
 </details>
 
+## 管理 Discord 發文
+
+可直接用 Node 新增、修改或刪除訊息，**不抓取官網、不呼叫 Codex**。預設使用 `.env` 的 `DISCORD_WEBHOOK_URL`。
+
+```bash
+# 新增純文字訊息，成功後會顯示 messageId
+node src/webhook.js create --content "測試公告"
+
+# 查詢目前 Webhook 的本機發文紀錄，取得 messageId
+node src/webhook.js list
+
+# 修改純文字；將數字換成實際的 messageId
+node src/webhook.js edit --message-id 123456789012345678 --content "修正後的公告"
+
+# 刪除指定訊息
+node src/webhook.js delete --message-id 123456789012345678
+```
+
+也可使用 `npm run webhook -- <操作> ...`；完整選項可用 `npm run webhook -- --help` 查看。`create`、`edit`、`delete` 會直接異動 Discord，**加上 `--dry-run` 就只預覽，不連線、不寫紀錄**。
+
+### 發送或修改卡片
+
+自動公告使用卡片，修改這類內容請使用 JSON 檔。先編輯範本 [examples/webhook-message.json](examples/webhook-message.json)，再執行：
+
+```bash
+# 先確認預計發送的卡片
+node src/webhook.js create --file examples/webhook-message.json --dry-run
+
+# 發送卡片
+node src/webhook.js create --file examples/webhook-message.json
+
+# 以 JSON 修改已發送的卡片
+node src/webhook.js edit --message-id 123456789012345678 --file examples/webhook-message.json
+```
+
+`--content` 與 `--file` 擇一。新增可讀取單一 JSON 物件或訊息物件陣列；修改只接受單一物件。JSON 檔路徑以目前執行目錄為準。
+
+修改時未提供的欄位會保留，提供的 `embeds` 則整組取代。`--content` 只修改普通文字，不會改動既有卡片；若要將卡片改為純文字，JSON 使用 `{"content":"新文字","embeds":[]}`。所有新增與修改都停用提及通知。
+
+### Webhook 與訊息紀錄
+
+| 選項 | 用途 |
+| --- | --- |
+| `--webhook URL` | 改用其他 Webhook；未指定時使用 `.env` |
+| `--thread-id ID` | 討論串內的訊息，新增、修改、刪除時指定討論串 ID；也可放在 Webhook URL 的 `thread_id` 參數 |
+| `--history-file PATH` | 改用其他發文紀錄檔，路徑以專案根目錄為準 |
+
+發文紀錄預設寫入 `data/discord-messages.jsonl`，保存 Webhook ID、訊息 ID、標題及操作時間，不保存 Webhook token。排程發送的每則公告也會立即記錄 ID，即使後續另一則發送失敗，仍可用 `list` 找出已成功的訊息並刪除。`list` 只讀本機紀錄；有設定 Webhook 時只列出該 Webhook，未設定時列出全部。此功能加入前的舊訊息不會自動補入，仍可自行取得訊息 ID 後操作。
+
+修改與刪除必須使用原本發送該訊息的 Webhook；商城拆成多則時需指定各則 ID 分別操作，見 [Discord 官方 Webhook 文件](https://docs.discord.com/developers/resources/webhook#edit-webhook-message)。手動操作不受公告去重限制，也不修改 `data/state.json`；刪除後若要重新產生公告，使用 `npm start -- --force`。
+
 ## 自動排程
 
 在 `.env` 修改排程設定，重新啟動 `npm run schedule` 後生效：
@@ -186,6 +238,7 @@ pm2 start npm --name artale --no-autorestart -- run schedule
 | `DISCORD_WEBHOOK_URL` | 無 | 正式發送及常駐排程必填；預覽不需要 |
 | `ARTALE_NEWS_CATEGORIES` | `update,bm` | 檢查哪些分類，逗號分隔 |
 | `STATE_FILE` | `data/state.json` | 公告版本紀錄檔 |
+| `DISCORD_MESSAGES_FILE` | `data/discord-messages.jsonl` | 每則 Discord 訊息的新增、修改及刪除紀錄，供 `webhook list` 查詢 |
 | `CODEX_BIN` | `codex` | CLI 執行檔名稱或絕對路徑 |
 | `CODEX_MODEL` | Codex 設定檔的模型 | 摘要使用的模型 |
 | `CODEX_TIMEOUT_MS` | `300000`（5 分鐘） | 單次摘要逾時時間 |
@@ -218,6 +271,8 @@ pm2 start npm --name artale --no-autorestart -- run schedule
 | 尚未設定 `DISCORD_WEBHOOK_URL` | 確認專案根目錄的 `.env` 已填入 Webhook 網址 |
 | `bad CPU type in executable` | 執行 `nvm use`，確認 Node 安裝架構適合目前電腦；可用 `nvm alias default 22` 設定預設版本 |
 | 內容轉譯錯誤，排程停止 | 檢查官網結構及 `src/artale.js` 解析規則，修正後先預覽，再重新啟動排程 |
+| 修改／刪除回傳 HTTP 404 | 確認訊息 ID 與原 Webhook 正確；訊息或 Webhook 可能已刪除 |
+| 顯示 Discord 操作已成功，但發文紀錄寫入失敗 | 保留錯誤內的訊息 ID，檢查 `DISCORD_MESSAGES_FILE` 路徑與權限，避免直接重試新增造成重複發文 |
 
 ### 錯誤發生後會怎樣
 
@@ -226,7 +281,7 @@ pm2 start npm --name artale --no-autorestart -- run schedule
 | 內容轉譯錯誤 | 整次所有分類都不發送、不寫紀錄 | 以結束碼 `2` 停止，需修正後重啟 |
 | 網路、Codex 或 Discord 錯誤 | 失敗分類不記錄版本，其他分類繼續處理 | 繼續執行，下個時間點重試；單次模式需再次執行 |
 
-若訊息已成功送出，但後續訊息或紀錄檔寫入失敗，重試時可能重複發送。程式只有在該分類全部訊息成功後才記錄版本。
+若訊息已成功送出，但後續訊息或紀錄檔寫入失敗，重試時可能重複發送。程式只有在該分類全部訊息成功後才記錄公告版本；每則成功訊息的 ID 則另寫入發文紀錄，可用[管理 Discord 發文](#管理-discord-發文)查詢或撤回。
 
 <details>
 <summary>哪些情況屬於內容轉譯錯誤</summary>
@@ -292,6 +347,8 @@ pm2 start npm --name artale --no-autorestart -- run schedule
 ├── .nvmrc              # Node 版本
 ├── package.json        # 執行指令
 ├── data/state.json     # 正式處理成功後產生的版本紀錄
+├── data/discord-messages.jsonl # 每則 Discord 訊息的操作紀錄
+├── examples/webhook-message.json # 手動發送與修改卡片的範本
 ├── src/
 │   ├── index.js        # 單次執行與預覽入口
 │   ├── scheduler.js    # 常駐排程入口
@@ -302,6 +359,9 @@ pm2 start npm --name artale --no-autorestart -- run schedule
 │   ├── state.js        # 版本比對與紀錄讀寫
 │   ├── summarize.js    # Codex 摘要
 │   ├── discord.js      # Discord 排版與發送
+│   ├── webhook.js      # 手動新增、修改、刪除與查詢入口
+│   ├── posts.js        # 執行 Webhook 操作並保存訊息 ID
+│   ├── env.js          # 共用 .env 載入與專案路徑
 │   ├── config.js       # 設定載入
 │   ├── errors.js       # 內容轉譯錯誤類型
 │   └── log.js          # 帶時間戳的紀錄輸出
