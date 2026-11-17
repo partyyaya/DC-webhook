@@ -87,6 +87,9 @@ test('購物商場：每個商品先圖片卡片、再文字卡片，最後是�
   assert.equal(header.title, '【新公告】11/17（二）Artale World 購物商場更新公告');
   assert.equal(header.description, undefined);
   assert.equal(header.image, undefined);
+  assert.equal(header.fields, undefined);
+  assert.equal(header.footer, undefined);
+  assert.equal(header.timestamp, undefined);
   assert.deepEqual(passImage.image, { url: 'https://cdn.example/pass.webp' });
   assert.equal(passImage.title, undefined);
   assert.equal(passText.title, '每週突襲重置獎勵通行證｜4,000 WC');
@@ -99,6 +102,12 @@ test('購物商場：每個商品先圖片卡片、再文字卡片，最後是�
   assert.equal(giftText.description, '內容物：突襲額外入場券、凍結加持器');
   assert.equal(others.title, '其他異動');
   assert.equal(others.description, '- 常駐禮包價格調整');
+  assert.deepEqual(others.fields, [
+    { name: '分類', value: '購物商場', inline: true },
+    { name: '發布時間', value: shopAnnouncement.publishedAt, inline: true },
+  ]);
+  assert.equal(others.timestamp, '2026-11-17T00:13:00.000Z');
+  assert.ok(others.footer.text.includes('Codex'));
 });
 
 test('購物商場公告內容被修改時，公告卡片註明（公告已更新）', () => {
@@ -135,6 +144,12 @@ test('購物商場：超過 10 張卡片時拆成多則訊息，且同一商品�
   const sourceCount = messages.flatMap(({ embeds }) => embeds)
     .filter(({ description }) => description?.includes('官網公告內文：')).length;
   assert.equal(sourceCount, 0);
+  const allEmbeds = messages.flatMap(m => m.embeds);
+  assert.equal(allEmbeds.filter(e => e.fields).length, 1);
+  assert.equal(allEmbeds.filter(e => e.footer).length, 1);
+  assert.equal(allEmbeds.filter(e => e.timestamp).length, 1);
+  assert.equal(allEmbeds.at(-1).fields[0].value, '購物商場');
+  assert.ok(allEmbeds.at(-1).footer);
 });
 
 test('購物商場：文字總量超過 6000 字時也會拆成多則訊息', () => {
@@ -162,6 +177,7 @@ test('購物商場：內容物過長時仍在卡片最後保留購買資訊', ()
   const description = embeds[1].description;
   assert.ok(description.length <= 4096);
   assert.ok(description.endsWith('購買條件：角色等級 70 以上\n可購買次數：每帳號每週限購 1 次\n販售時間：11/17 維護後～11/24 維護前'));
+  assert.equal(embeds[1].fields[0].value, '購物商場');
 });
 
 test('購物商場只有其他異動時，截斷內文並保留標題連結', () => {
@@ -170,4 +186,5 @@ test('購物商場只有其他異動時，截斷內文並保留標題連結', ()
   assert.equal(embeds[1].description.length, 4096);
   assert.ok(embeds[1].description.endsWith('…'));
   assert.equal(embeds[0].url, shopAnnouncement.url);
+  assert.equal(embeds[1].fields[0].value, '購物商場');
 });

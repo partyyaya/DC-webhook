@@ -4,8 +4,9 @@
  * 在頻道中顯示的樣子：
  *   - 版本更新：一張卡片，包含標題（可點擊開啟官網公告）、摘要內文、「分類」與「發布時間」欄位、
  *     底部說明文字與發布時間。
- *   - 購物商場：先一張公告卡片（標題、欄位），接著每個商品「先圖片卡片、再文字卡片」，
- *     最後是「其他異動」卡片。卡片太多時會拆成好幾則訊息依序發送。
+ *   - 購物商場：先一張公告標題卡片，接著每個商品「先圖片卡片、再文字卡片」，
+ *     最後是「其他異動」卡片；分類、發布時間與底部說明放在最後一張文字卡片。
+ *     卡片太多時會拆成好幾則訊息依序發送。
  *     （Discord 卡片的大圖固定顯示在文字下方，所以圖片要放在獨立的卡片才能排在文字前面）
  *   - 各分類獨立發送，透過公告標題連至官網，內文不重複附上公告網址。
  */
@@ -93,7 +94,7 @@ export function buildShopMessages(announcement, { products, otherChanges }, kind
   if (products.length === 0 && otherChanges.length === 0) return [];
 
   // 公告卡片；公告內容被修改時在卡片內文註明
-  const header = buildHeaderEmbed(announcement, kind);
+  const { fields, footer, timestamp, ...header } = buildHeaderEmbed(announcement, kind);
   if (kind === 'updated') header.description = '（公告已更新）';
 
   // 每個商品先圖片、再文字；購買條件、可購買次數與販售時間依序放在文字卡片最後
@@ -131,6 +132,11 @@ export function buildShopMessages(announcement, { products, otherChanges }, kind
       },
     ]);
   }
+
+  // 公告資訊放在整篇最後一張文字卡片，先加入再計算分頁的字數限制。
+  Object.assign(groups.at(-1).at(-1), {
+    fields, footer, ...(timestamp ? { timestamp } : {}),
+  });
 
   // 依序把每組卡片裝進訊息；放不下（超過 10 張或 6000 字）就開始下一則訊息
   const messages = [];
