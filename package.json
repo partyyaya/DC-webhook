@@ -1,0 +1,17 @@
+{
+  "name": "dcwebhook",
+  "version": "1.0.0",
+  "description": "每小時檢查 Artale 官方公告，有更新時以 Codex CLI 產生繁體中文摘要並發送到 Discord Webhook",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dry-run": "node src/index.js --dry-run",
+    "schedule": "node src/scheduler.js",
+    "test": "node --test"
+  }
+}
