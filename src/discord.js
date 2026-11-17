@@ -7,6 +7,7 @@
  *   - 購物商場：先一張公告卡片（標題、欄位、縮圖），接著每個商品「先圖片卡片、再文字卡片」，
  *     最後是「其他異動」卡片。卡片太多時會拆成好幾則訊息依序發送。
  *     （Discord 卡片的大圖固定顯示在文字下方，所以圖片要放在獨立的卡片才能排在文字前面）
+ *   - 各分類獨立發送，在各自最後一張文字卡片的最後附上該篇官網公告內文網址。
  */
 
 // Discord embed 的長度上限：標題 256 字、內文 4096 字，超過會被 Discord 拒絕
@@ -72,7 +73,11 @@ function buildHeaderEmbed(announcement, kind) {
  * @returns {object} Discord Webhook 的請求內容
  */
 export function buildDiscordPayload(announcement, summary, kind) {
-  const embed = { ...buildHeaderEmbed(announcement, kind), description: truncate(summary, DESCRIPTION_LIMIT) };
+  const source = sourceSuffix(announcement);
+  const embed = {
+    ...buildHeaderEmbed(announcement, kind),
+    description: `${truncate(summary, DESCRIPTION_LIMIT - source.length)}${source}`,
+  };
   return { allowed_mentions: NO_MENTIONS, embeds: [embed] };
 }
 
@@ -92,9 +97,13 @@ export function buildShopMessages(announcement, { products, otherChanges }, kind
   // 公告卡片；公告內容被修改時在卡片內文註明
   const header = buildHeaderEmbed(announcement, kind);
   if (kind === 'updated') header.description = '（公告已更新）';
+  const source = sourceSuffix(announcement);
 
   // 每個商品先圖片、再文字；購買條件、可購買次數與販售時間依序放在文字卡片最後
-  const groups = products.map((product) => {
+  const groups = products.map((product, index) => {
+    // 沒有其他異動時，最後一個商品的文字卡片就是整篇摘要的結尾。
+    const ending = index === products.length - 1 && otherChanges.length === 0 ? source : '';
+    const descriptionLimit = DESCRIPTION_LIMIT - ending.length;
     const lines = [
       `內容物：${product.contents.length > 0 ? product.contents.join('、') : '公告未列出'}`,
       ...product.links.map((link) => `[${link.text.replace(/[[\]]/g, '')}](${link.url})`),
@@ -106,13 +115,13 @@ export function buildShopMessages(announcement, { products, otherChanges }, kind
     ]
       .filter(([, value]) => typeof value === 'string' && value.trim() && value.trim() !== '公告未註明')
       .map(([label, value]) => `${label}：${value.trim()}`)
-      .join('\n'), DESCRIPTION_LIMIT - 2);
+      .join('\n'), descriptionLimit - 2);
     const suffix = purchaseDetails ? `\n${purchaseDetails}` : '';
     const textEmbed = {
       color: EMBED_COLOR,
       title: truncate(`${product.name}｜${product.price}`, TITLE_LIMIT),
-      // 預留購買資訊的空間，避免內容物太長時把最後三項截掉
-      description: `${truncate(lines.join('\n'), DESCRIPTION_LIMIT - suffix.length)}${suffix}`,
+      // 預留購買資訊及官網內文網址的空間，避免內容物太長時把它們截掉
+      description: `${truncate(lines.join('\n'), descriptionLimit - suffix.length)}${suffix}${ending}`,
     };
     return product.image ? [{ color: EMBED_COLOR, image: { url: product.image } }, textEmbed] : [textEmbed];
   });
@@ -123,7 +132,7 @@ export function buildShopMessages(announcement, { products, otherChanges }, kind
       {
         color: EMBED_COLOR,
         title: '其他異動',
-        description: truncate(otherChanges.map((change) => `- ${change}`).join('\n'), DESCRIPTION_LIMIT),
+        description: `${truncate(otherChanges.map((change) => `- ${change}`).join('\n'), DESCRIPTION_LIMIT - source.length)}${source}`,
       },
     ]);
   }
@@ -143,6 +152,11 @@ export function buildShopMessages(announcement, { products, otherChanges }, kind
   messages.push(current);
 
   return messages.map((embeds) => ({ allowed_mentions: NO_MENTIONS, embeds }));
+}
+
+/** 各分類使用自己公告的內文網址，由程式附加，避免摘要遺漏或產生錯誤網址。 */
+function sourceSuffix(announcement) {
+  return `\n\n官網公告內文：${announcement.url}`;
 }
 
 /**
