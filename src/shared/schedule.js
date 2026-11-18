@@ -1,7 +1,7 @@
 /**
  * 排程時間模組：解析排程相關的環境變數，並計算「下一次檢查時間」、判斷「現在是否在排程時段內」。
  *
- * 排程設定由以下環境變數組成（在 config.js 讀取）：
+ * 排程設定由各來源的 config.js 讀取後傳入；以下為欄位名稱，Artale 實際加上 ARTALE_ 前綴：
  *   SCHEDULE_DAYS           星期幾，1～7（1=週一、7=週日），可用逗號與範圍，例如 2、1-5、2,4
  *   SCHEDULE_START          每天開始檢查的時間（HH:MM）
  *   SCHEDULE_END            每天最後一次檢查的時間（HH:MM）
@@ -27,19 +27,20 @@ const formatters = new Map();
  * @param {string} raw.end SCHEDULE_END 原始字串
  * @param {number} raw.intervalMinutes 檢查間隔（分鐘）
  * @param {string} raw.timeZone 時區名稱
+ * @param {{envPrefix?: string}} [options] 錯誤訊息使用的環境變數前綴
  * @returns {{days: Set<number>, start: number, end: number, intervalMinutes: number, timeZone: string}}
  *   days 為 0～6 的星期集合（0=週日）；start、end 為「當天第幾分鐘」（08:20 → 500）
  */
-export function createSchedule({ days, start, end, intervalMinutes, timeZone }) {
+export function createSchedule({ days, start, end, intervalMinutes, timeZone }, { envPrefix = '' } = {}) {
   const schedule = {
-    days: parseDays(days),
-    start: parseTime(start, 'SCHEDULE_START'),
-    end: parseTime(end, 'SCHEDULE_END'),
+    days: parseDays(days, `${envPrefix}SCHEDULE_DAYS`),
+    start: parseTime(start, `${envPrefix}SCHEDULE_START`),
+    end: parseTime(end, `${envPrefix}SCHEDULE_END`),
     intervalMinutes,
-    timeZone: validateTimeZone(timeZone),
+    timeZone: validateTimeZone(timeZone, `${envPrefix}SCHEDULE_TIMEZONE`),
   };
   if (schedule.start > schedule.end) {
-    throw new Error(`SCHEDULE_START（${start}）不能晚於 SCHEDULE_END（${end}），目前不支援跨越午夜的時段`);
+    throw new Error(`${envPrefix}SCHEDULE_START（${start}）不能晚於 ${envPrefix}SCHEDULE_END（${end}），目前不支援跨越午夜的時段`);
   }
   return schedule;
 }
@@ -49,10 +50,11 @@ export function createSchedule({ days, start, end, intervalMinutes, timeZone }) 
  * 1～6 為週一～週六，7 或 0 都代表週日。
  *
  * @param {string} text 原始字串
+ * @param {string} [name] 錯誤訊息使用的環境變數名稱
  * @returns {Set<number>} 0～6 的星期集合（0=週日，與 getUTCDay() 相同）
  */
-export function parseDays(text) {
-  const formatError = new Error(`SCHEDULE_DAYS 格式錯誤：「${text}」，請使用 1～7（1=週一、7=週日），例如 2、1-5 或 2,4`);
+export function parseDays(text, name = 'SCHEDULE_DAYS') {
+  const formatError = new Error(`${name} 格式錯誤：「${text}」，請使用 1～7（1=週一、7=週日），例如 2、1-5 或 2,4`);
   const days = new Set();
 
   // 以逗號分隔，每一段可以是單一數字（2）或範圍（1-5）
@@ -93,12 +95,12 @@ export function parseTime(text, name) {
  * @param {string} timeZone 時區名稱
  * @returns {string} 原本的時區名稱
  */
-function validateTimeZone(timeZone) {
+function validateTimeZone(timeZone, name = 'SCHEDULE_TIMEZONE') {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone });
     return timeZone;
   } catch {
-    throw new Error(`SCHEDULE_TIMEZONE 不是有效的時區：「${timeZone}」，例如 Asia/Taipei`);
+    throw new Error(`${name} 不是有效的時區：「${timeZone}」，例如 Asia/Taipei`);
   }
 }
 

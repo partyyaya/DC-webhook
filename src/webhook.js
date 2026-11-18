@@ -3,9 +3,9 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { parseWebhookUrl } from './discord.js';
-import { loadProjectEnv, ROOT_DIR } from './env.js';
-import { listPosts, managePost } from './posts.js';
+import { parseWebhookUrl } from './shared/discord.js';
+import { loadProjectEnv, ROOT_DIR } from './shared/env.js';
+import { listPosts, managePost } from './shared/posts.js';
 
 export const WEBHOOK_HELP = `用法：node src/webhook.js <create|edit|delete|list> [選項]
 也可使用：npm run webhook -- <操作> [選項]
@@ -18,9 +18,10 @@ export const WEBHOOK_HELP = `用法：node src/webhook.js <create|edit|delete|li
   list                                      查看本機發文紀錄與訊息 ID
 
 共用選項：
-  --webhook URL       改用指定 Webhook，預設讀取 .env 的 DISCORD_WEBHOOK_URL
+  --source NAME       使用 artale、stocks 或 crypto 的專屬 Webhook 與紀錄設定
+  --webhook URL       改用指定 Webhook；未選來源時必填
   --thread-id ID      訊息所在的討論串 ID（討論串訊息需提供）
-  --history-file PATH 發文紀錄檔，預設讀取 DISCORD_MESSAGES_FILE
+  --history-file PATH 改用指定發文紀錄檔，未指定時使用來源的預設紀錄
   --dry-run           僅顯示操作內容，不連線、不修改或刪除訊息、不寫紀錄
   --help              顯示說明
 
@@ -64,13 +65,22 @@ function validatePayload(payload, action) {
   return { ...payload, allowed_mentions: { parse: [] } };
 }
 
-export async function runWebhookCommand(args, { env = process.env, output = console.log, requestOptions = {} } = {}) {
+export async function runWebhookCommand(args, { env = process.env, output = console.log, requestOptions = {}, source: boundSource, loadEnv = false } = {}) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     content: { type: 'string' }, file: { type: 'string' },
     'message-id': { type: 'string' }, webhook: { type: 'string' }, 'thread-id': { type: 'string' },
-    'history-file': { type: 'string' }, 'dry-run': { type: 'boolean' }, help: { type: 'boolean' },
+    source: { type: 'string' }, 'history-file': { type: 'string' }, 'dry-run': { type: 'boolean' }, help: { type: 'boolean' },
   } });
-  if (values.help || positionals.length === 0) { output(WEBHOOK_HELP); return; }
+  if (values.help || positionals.length === 0) {
+    output(boundSource === 'artale'
+      ? WEBHOOK_HELP.replaceAll('node src/webhook.js', 'node src/artale/webhook.js').replaceAll('npm run webhook', 'npm run artale:webhook')
+        + '\n此入口固定讀取 env/.env.artale：ARTALE_DISCORD_WEBHOOK_URL、ARTALE_DISCORD_MESSAGES_FILE。'
+      : WEBHOOK_HELP);
+    return;
+  }
+  const source = values.source ?? boundSource;
+  if (source !== undefined && !['artale', 'stocks', 'crypto'].includes(source)) throw new Error('--source 請使用 artale、stocks 或 crypto');
+  if (boundSource && source !== boundSource) throw new Error(`此指令固定使用 ${boundSource}，不能切換其他來源`);
   const [action] = positionals;
   if (positionals.length !== 1 || !['create', 'edit', 'delete', 'list'].includes(action)) {
     throw new Error('請使用 create、edit、delete 或 list；加上 --help 查看用法');
@@ -86,15 +96,20 @@ export async function runWebhookCommand(args, { env = process.env, output = cons
   if (['delete', 'list'].includes(action) && (hasContent || hasFile)) throw new Error('刪除或查詢不接受 --content、--file');
   if (action === 'list' && (values['thread-id'] !== undefined || values['dry-run'])) throw new Error('list 不接受 --thread-id 或 --dry-run');
 
-  const historyFile = path.resolve(ROOT_DIR, values['history-file'] || env.DISCORD_MESSAGES_FILE || 'data/discord-messages.jsonl');
-  const webhook = values.webhook ?? env.DISCORD_WEBHOOK_URL;
+  if (loadEnv) loadProjectEnv(source, { env });
+  const prefix = source?.toUpperCase();
+  const defaultHistory = `data/${source ?? 'shared'}/discord-messages.jsonl`;
+  const historyFile = path.resolve(ROOT_DIR, values['history-file'] || (prefix && env[`${prefix}_DISCORD_MESSAGES_FILE`]) || defaultHistory);
+  const webhook = values.webhook ?? (prefix ? env[`${prefix}_DISCORD_WEBHOOK_URL`] : undefined);
   if (action === 'list') {
     const webhookId = webhook ? parseWebhookUrl(webhook).pathname.match(/\/webhooks\/(\d+)\//)[1] : undefined;
     const posts = await listPosts(historyFile, webhookId);
     output(JSON.stringify(posts, null, 2));
     return posts;
   }
-  if (!webhook) throw new Error('請在 .env 設定 DISCORD_WEBHOOK_URL，或用 --webhook 指定');
+  if (!webhook) throw new Error(prefix
+    ? `請在 env/.env.${source} 設定 ${prefix}_DISCORD_WEBHOOK_URL，或用 --webhook 指定`
+    : '請用 --source 選擇來源，或用 --webhook 指定 Webhook');
   const url = parseWebhookUrl(webhook);
   if (values['thread-id'] !== undefined) {
     if (!/^\d+$/.test(values['thread-id'])) throw new Error('--thread-id 必須是數字 ID');
@@ -130,8 +145,7 @@ export async function runWebhookCommand(args, { env = process.env, output = cons
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   try {
-    loadProjectEnv();
-    await runWebhookCommand(process.argv.slice(2));
+    await runWebhookCommand(process.argv.slice(2), { loadEnv: true });
   } catch (err) {
     console.error(`Webhook 操作失敗：${err.message}`);
     process.exitCode = 1;

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getPublishedTime } from '../src/announcement-dates.js';
+import { getPublishedTime } from '../../src/artale/announcement-dates.js';
 
 test('以官網台灣時間解析發布日期、時分與秒數', () => {
   assert.equal(getPublishedTime({ publishedAt: '2026.11.17 08:13' }), Date.parse('2026-11-17T00:13:00Z'));

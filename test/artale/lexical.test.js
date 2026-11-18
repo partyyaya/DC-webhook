@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { findMissingText, lexicalToMarkdown } from '../src/lexical.js';
+import { findMissingText, lexicalToMarkdown } from '../../src/artale/lexical.js';
 
 const text = (value) => ({ type: 'text', text: value });
 const paragraph = (...children) => ({ type: 'paragraph', children });

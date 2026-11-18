@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildDiscordMessages, buildDiscordPayload, buildShopMessages, toIsoTimestamp } from '../src/discord.js';
+import { buildDiscordMessages, buildDiscordPayload, buildShopMessages, toIsoTimestamp } from '../../src/artale/format.js';
 
 const announcement = {
   id: 'abc',

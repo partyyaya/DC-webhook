@@ -1,6 +1,6 @@
 /**
  * 版本紀錄模組：負責計算公告內容的雜湊值、比對是否有變化，
- * 以及讀寫已發送紀錄檔（預設 data/state.json），用來避免重複通知。
+ * 以及讀寫已發送紀錄檔（預設 data/artale/state.json），用來避免重複通知。
  *
  * 紀錄檔格式：
  *   { "notified": [ { id, hash, title, publishedAt, url, notifiedAt }, ... ] }

@@ -3,26 +3,26 @@
  *
  * 依 ARTALE_NEWS_CATEGORIES 設定的分類（預設「維護」、「更新」與「購物商場」）分兩個階段處理：
  *
- *   第一階段：抓取並轉譯每個分類最新的一篇公告  （artale.js）
+ *   第一階段：抓取並轉譯各分類第一頁中符合本輪範圍的公告  （client.js）
  *     任何一個分類發生「內容轉譯錯誤」（ContentParseError，通常是官網結構改變），
  *     就整次停止、什麼都不發送，並把錯誤往外拋，讓 index.js / scheduler.js 結束程式。
  *
- *   第二階段：每個分類各自執行
+ *   第二階段：依分類順序與發布時間逐篇執行
  *     1. 計算雜湊值並與紀錄比對        （state.js）
- *     2. 沒有變化就跳過這個分類
+ *     2. 沒有變化就跳過該篇公告
  *     3. 有變化才呼叫 Codex 產生摘要    （summarize.js）
- *     4. 發送到 Discord Webhook         （discord.js）
+ *     4. 發送到 Discord Webhook         （../shared/posts.js）
  *     5. 記錄已發送的公告版本          （state.js）
  *
  * index.js（單次執行）與 scheduler.js（常駐排程）都是呼叫這裡的 runOnce()。
  */
-import { categoryUrl, fetchLatestAnnouncement, NEWS_CATEGORIES } from './artale.js';
+import { categoryUrl, fetchAnnouncementsInRange, NEWS_CATEGORIES } from './client.js';
 import { getPublishedTime } from './announcement-dates.js';
 import { config } from './config.js';
-import { buildDiscordMessages } from './discord.js';
-import { managePost } from './posts.js';
+import { buildDiscordMessages } from './format.js';
+import { managePost } from '../shared/posts.js';
 import { ContentParseError } from './errors.js';
-import { log, logError } from './log.js';
+import { log, logError } from '../shared/log.js';
 import { detectChange, hashAnnouncement, loadState, recordNotified, saveState } from './state.js';
 import {
   buildSummaryPrompt,
@@ -31,8 +31,8 @@ import {
   parseShopSummary,
   previewShopSummary,
   SHOP_SCHEMA,
-  summarizeWithCodex,
 } from './summarize.js';
+import { summarizeWithCodex } from '../shared/codex.js';
 
 // 依比對結果（新公告／公告更新／強制重發）顯示對應的紀錄訊息
 const CHANGE_MESSAGES = {
@@ -42,43 +42,60 @@ const CHANGE_MESSAGES = {
 };
 
 const NOTIFICATION_PRIORITY = { maintenance: 0, update: 1, bm: 2 };
+const ANNOUNCEMENT_LIMITS = { maintenance: 1, update: 3, bm: 1 };
 
 /**
  * 執行一次完整的公告檢查。
  *
  * 錯誤處理：
  *   - 內容轉譯錯誤（ContentParseError）：立即停止，不發送任何訊息，直接拋出。
- *   - 其他錯誤（網路逾時、Codex、Discord 暫時失敗）：只跳過該分類，其他分類照常處理，
- *     全部處理完後再拋出錯誤，讓呼叫端以失敗結束；下一個排程時間點會再試。
+ *   - 抓取暫時失敗：跳過該分類；摘要或發送失敗：只跳過該篇，其他公告繼續處理。
+ *     全部處理完後再拋錯；後續執行只有仍在時間範圍內的公告才會再試。
  *
  * @param {object} [options]
  * @param {boolean} [options.dryRun=false] 預覽模式：印出將發送的內容，但不發送 Discord、不寫入紀錄
- * @param {boolean} [options.force=false] 忽略比對結果，即使沒有變化也重新發送
+ * @param {boolean} [options.force=false] 忽略版本比對，仍遵守本輪範圍與維護判斷
+ * @param {boolean} [options.startup=false] 啟動檢查：依分類篇數上限，不限制回溯分鐘數
+ * @param {Date | number} [options.now=Date.now()] 本輪開始時間，供模擬及測試固定範圍
  * @returns {Promise<Array<{category: string, status: 'unchanged' | 'outdated' | 'unavailable' | 'dry-run' | 'sent', announcement: object, messages?: object[]}>>}
  */
-export async function runOnce({ dryRun = false, force = false } = {}) {
+export async function runOnce({ dryRun = false, force = false, startup = false, now = Date.now() } = {}) {
   // 正式發送前先確認 Webhook 已設定（預覽模式不需要）
   if (!dryRun && !config.discordWebhookUrl) {
-    throw new Error('尚未設定環境變數 DISCORD_WEBHOOK_URL');
+    throw new Error('尚未設定環境變數 ARTALE_DISCORD_WEBHOOK_URL');
   }
 
+  // 整輪共用同一個時間快照，抓取及摘要耗時不會移動本輪範圍。
+  const endTime = new Date(now).getTime();
+  const startTime = startup ? 0 : endTime - config.schedule.intervalMinutes * 60_000;
+  if (!Number.isFinite(endTime)) throw new Error('執行時間無效');
+  const showTime = time => new Date(time + 8 * 60 * 60 * 1000).toISOString().replace('T', ' ').replace('Z', '（GMT+8）');
+  if (startup) log('啟動檢查：第一頁維護最新 1 篇、版本更新最新 3 篇、商城最新 1 篇，不限制回溯分鐘數。');
+  else log(`公告檢查範圍：${showTime(startTime)} ～ ${showTime(endTime)}（含起訖時間，只讀第一頁）`);
   const failedLabels = [];
   const selected = new Set(config.newsCategories);
   const fetchCategories = [...selected];
   // 只選維護時，也需要讀取版本更新公告作發布時間比對，但不因此發送版本更新。
   if (selected.has('maintenance') && !selected.has('update')) fetchCategories.push('update');
 
-  // 第一階段：抓取並轉譯所有分類的最新公告。全部成功後才進入發送階段，
+  // 第一階段：抓取並轉譯所有分類第一頁中符合本輪範圍的公告。全部成功後才進入發送階段，
   // 確保只要有任何一個分類轉譯錯誤，這次就一則訊息都不會發出去。
   const fetched = [];
+  let latestUpdate;
   for (const category of fetchCategories) {
     const label = NEWS_CATEGORIES[category];
     try {
-      const announcement = await fetchLatestAnnouncement({
+      const limit = selected.has(category) ? ANNOUNCEMENT_LIMITS[category] : 1;
+      const { announcements, latestAnnouncement } = await fetchAnnouncementsInRange({
         newsUrl: categoryUrl(category),
         timeoutMs: config.httpTimeoutMs,
+        startTime, endTime,
+        includeLatest: selected.has('maintenance') && category === 'update',
+        limit,
       });
-      fetched.push({ category, label, announcement });
+      if (category === 'update') latestUpdate = latestAnnouncement;
+      for (const announcement of announcements) fetched.push({ category, label, announcement });
+      if (selected.has(category)) log(`[${label}] 第一頁${limit ? `最新 ${limit} 篇中` : '中'}符合${startup ? '啟動檢查' : '時間範圍'}的公告共 ${announcements.length} 篇。`);
     } catch (err) {
       // 內容轉譯錯誤：加上分類名稱後往外拋，整次停止
       if (err instanceof ContentParseError) {
@@ -91,12 +108,13 @@ export async function runOnce({ dryRun = false, force = false } = {}) {
   }
 
   // 第二階段：逐一比對，有變化才摘要、發送、記錄。
-  // 每個分類發送成功後會更新紀錄，再交給下一個分類比對。
+  // 每篇公告處理成功後會更新紀錄，再交給下一篇比對。
   let state = await loadState(config.stateFile);
   const results = [];
-  const latestUpdate = fetched.find(item => item.category === 'update')?.announcement;
   const notifications = fetched.filter(item => selected.has(item.category))
-    .sort((a, b) => (NOTIFICATION_PRIORITY[a.category] ?? 3) - (NOTIFICATION_PRIORITY[b.category] ?? 3));
+    .sort((a, b) => (NOTIFICATION_PRIORITY[a.category] ?? 3) - (NOTIFICATION_PRIORITY[b.category] ?? 3)
+      || config.newsCategories.indexOf(a.category) - config.newsCategories.indexOf(b.category)
+      || getPublishedTime(a.announcement) - getPublishedTime(b.announcement));
   for (const item of notifications) {
     try {
       if (item.category === 'maintenance') {
@@ -129,7 +147,7 @@ export async function runOnce({ dryRun = false, force = false } = {}) {
 }
 
 /**
- * 處理單一分類已抓到的公告：比對 → 有變化才摘要、發送並記錄。
+ * 處理已抓到的單篇公告：比對 → 有變化才摘要、發送並記錄。
  *
  * @param {{category: string, label: string, announcement: object}} item 第一階段抓到的資料
  * @param {{notified: object[]}} state 目前的已發送紀錄
@@ -138,14 +156,14 @@ export async function runOnce({ dryRun = false, force = false } = {}) {
  *   回傳的 state 為處理後的紀錄（有發送時會包含剛發送的版本）
  */
 async function notifyIfChanged({ category, label, announcement }, state, { dryRun, force }) {
-  // 每行紀錄前面加上分類名稱，例如「[購物商場] 最新公告：…」
+  // 每行紀錄前面加上分類名稱，例如「[購物商場] 公告：…」
   const say = (message) => log(`[${label}] ${message}`);
 
   // 步驟 1：計算內容雜湊值，用公告 ID + 雜湊值比對已發送紀錄
   const hash = hashAnnouncement(announcement);
-  say(`最新公告：${announcement.title}（ID ${announcement.id}，${announcement.publishedAt}，hash ${hash.slice(0, 12)}）`);
+  say(`公告：${announcement.title}（ID ${announcement.id}，${announcement.publishedAt}，hash ${hash.slice(0, 12)}）`);
 
-  // 步驟 2：完全沒有變化就跳過這個分類
+  // 步驟 2：完全沒有變化就跳過這篇公告
   const change = detectChange(state, announcement.id, hash);
   if (!change.changed && !force) {
     say('與已通知過的版本相同，沒有變化。');
@@ -153,7 +171,7 @@ async function notifyIfChanged({ category, label, announcement }, state, { dryRu
   }
   say(CHANGE_MESSAGES[change.kind]);
 
-  // 步驟 3：有變化才呼叫 Codex 產生摘要，並組出要發送的 Discord 訊息（購物商場可能有多則）
+  // 步驟 3：有變化才呼叫共用 Codex 執行器產生摘要，再用 Artale 格式組出訊息（商城可能有多則）
   const summary = await summarize(announcement, change.kind, category, dryRun, say);
   const messages = buildDiscordMessages(announcement, summary, change.kind);
 
@@ -164,7 +182,7 @@ async function notifyIfChanged({ category, label, announcement }, state, { dryRu
     return { category, status: 'dry-run', state, announcement, messages };
   }
 
-  // 步驟 4：依序發送到 Discord；發送失敗會拋錯，不會執行下面的紀錄步驟，下次檢查會重試
+  // 步驟 4：依序發送到 Discord；失敗不記錄公告版本，仍在後續檢查範圍時才重試。
   for (const payload of messages) {
     const post = await managePost('create', config.discordWebhookUrl, {
       payload, historyFile: config.discordMessagesFile,
@@ -195,7 +213,7 @@ async function notifyIfChanged({ category, label, announcement }, state, { dryRu
  *   - 購物商場（bm）：要求 Codex 回覆 SHOP_SCHEMA 格式的 JSON，解析後回傳商品資料。
  *   - 維護（maintenance）：要求 Codex 回覆 MAINTENANCE_SCHEMA，僅組成維護時間內文。
  *   - 其他分類：回傳 Codex 寫好的文字摘要。
- * 正式模式下 Codex 失敗（或回覆格式不符）就直接拋錯（不發送、不記錄，等下次重試）；
+ * 正式模式下 Codex 失敗（或回覆格式不符）就直接拋錯（不發送、不記錄）；
  * 預覽模式下則改用預覽內容代替，讓還沒安裝 Codex 時也能看到訊息長相。
  *
  * @param {object} announcement 公告資料（含標題、內文等）

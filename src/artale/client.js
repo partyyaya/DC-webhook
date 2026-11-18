@@ -1,5 +1,5 @@
 /**
- * Artale 官網公告模組：抓取公告列表與內文頁，解析出最新一篇公告的完整資料。
+ * Artale 官網公告模組：只抓取公告列表第一頁，解析指定發布時間範圍內的公告。
  *
  * 官網（artale.live）是用 Next.js 製作的：
  *   - 公告列表的 HTML 直接包含每一筆公告的連結、標題、日期，可以直接解析。
@@ -10,6 +10,7 @@
  * 代表官網結構可能改變了，主流程會因此停止且不發送任何訊息（見 errors.js）。
  */
 import { ContentParseError } from './errors.js';
+import { getPublishedTime } from './announcement-dates.js';
 import { findMissingText, lexicalToMarkdown } from './lexical.js';
 
 // 模擬一般瀏覽器的 User-Agent，避免被網站當成機器人擋下
@@ -69,27 +70,49 @@ export function categoryUrl(category) {
 }
 
 /**
- * 取得最新的一篇公告（含全文）。這是本模組對外的主要入口。
+ * 從第一頁依發布時間選取最新 limit 篇，再套用 [startTime, endTime] 範圍。
+ * includeLatest 用於維護比對：額外讀取最新日期的公告，回傳最新版本更新供參考。
+ * 列表只有日期，先依台灣日期縮小候選範圍，再依內文頁的完整發布時間篩選。
  *
- * 流程：抓列表第一頁 → 依日期挑出最新的候選公告 → 逐篇抓內文頁 → 以發布時間（含時分）選出最新一篇。
- *
- * @param {object} options
- * @param {string} options.newsUrl 公告列表網址
- * @param {number} options.timeoutMs 每個 HTTP 請求的逾時時間
- * @returns {Promise<object>} 公告資料：id、url、title、date、category、pinned、publishedAt、thumbnail、content
+ * @param {{newsUrl: string, timeoutMs: number, startTime: number, endTime: number, includeLatest?: boolean, limit?: number}} options
+ * @returns {Promise<{announcements: object[], latestAnnouncement?: object}>}
  */
-export async function fetchLatestAnnouncement({ newsUrl, timeoutMs }) {
-  // 抓公告列表並解析出每一筆公告（解析失敗會拋出 ContentParseError）
-  const items = parseNewsList(await fetchHtml(newsUrl, timeoutMs), newsUrl);
-
-  // 逐篇抓取候選公告的內文頁（依序抓取，避免同時對官網發出太多請求）
-  const announcements = [];
-  for (const item of newestCandidates(items)) {
-    announcements.push(await fetchAnnouncement(item, timeoutMs));
+export async function fetchAnnouncementsInRange({ newsUrl, timeoutMs, startTime, endTime, includeLatest = false, limit = Infinity }) {
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || startTime > endTime) {
+    throw new Error('公告檢查時間範圍無效');
   }
-
-  // 發布時間格式為「YYYY.MM.DD HH:mm」，可以直接用字串比較大小，取最晚的一篇
-  return announcements.reduce((latest, current) => (current.publishedAt > latest.publishedAt ? current : latest));
+  if (limit !== Infinity && (!Number.isInteger(limit) || limit < 1)) throw new Error('公告篇數限制必須為正整數');
+  const taiwanDate = time => new Date(time + 8 * 60 * 60 * 1000).toISOString().slice(0, 10).replaceAll('-', '.');
+  const startDate = taiwanDate(startTime);
+  const endDate = taiwanDate(endTime);
+  const seen = new Set();
+  const parsed = [];
+  const items = parseNewsList(await fetchHtml(newsUrl, timeoutMs), newsUrl);
+  const latestDate = items.reduce((latest, item) => item.date > latest ? item.date : latest, '');
+  const candidates = items.filter(item => (item.date >= startDate && item.date <= endDate) || (includeLatest && item.date === latestDate))
+    .sort((a, b) => b.date.localeCompare(a.date));
+  let previousDate;
+  let publishedCount = 0;
+  for (const item of candidates) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    // 同一天的列表沒有時分，需讀完整個截止日期後才能決定最新幾篇；較舊日期可停止。
+    if (item.date !== previousDate && publishedCount >= limit) break;
+    previousDate = item.date;
+    const announcement = await fetchAnnouncement(item, timeoutMs);
+    const time = getPublishedTime(announcement);
+    if (time === undefined) {
+      throw new ContentParseError(`公告 ${item.id} 的發布時間無法解析，無法判斷是否落在檢查範圍`);
+    }
+    parsed.push({ announcement, time });
+    if (time <= endTime) publishedCount++;
+  }
+  const published = parsed.filter(item => item.time <= endTime).sort((a, b) => b.time - a.time);
+  return {
+    announcements: published.slice(0, limit).filter(item => item.time >= startTime)
+      .sort((a, b) => a.time - b.time).map(item => item.announcement),
+    ...(includeLatest ? { latestAnnouncement: published[0]?.announcement } : {}),
+  };
 }
 
 /**
@@ -165,20 +188,6 @@ export function parseNewsList(html, baseUrl) {
     );
   }
   return items;
-}
-
-/**
- * 從公告列表中挑出「日期最新」的公告作為候選（可能不只一篇）。
- *
- * 置頂的舊公告會排在列表最前面，且列表只顯示日期（YYYY.MM.DD），
- * 因此先挑出日期最新的幾篇，再由內文頁含時分的發布時間決定最新一篇。
- *
- * @param {Array<{date: string}>} items 公告列表
- * @returns {Array<object>} 日期等於最新日期的所有公告（保持原本順序）
- */
-export function newestCandidates(items) {
-  const newestDate = items.reduce((max, item) => (item.date > max ? item.date : max), '');
-  return items.filter((item) => item.date === newestDate);
 }
 
 /**

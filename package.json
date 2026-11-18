@@ -4,15 +4,15 @@
   "description": "每小時檢查 Artale 官方公告，有更新時以 Codex CLI 產生繁體中文摘要並發送到 Discord Webhook",
   "private": true,
   "type": "module",
-  "main": "src/index.js",
   "engines": {
     "node": ">=20.12"
   },
   "scripts": {
-    "start": "node src/index.js",
-    "dry-run": "node src/index.js --dry-run",
-    "schedule": "node src/scheduler.js",
+    "artale": "node src/artale/index.js",
+    "artale:preview": "node src/artale/index.js --dry-run",
+    "artale:schedule": "node src/artale/scheduler.js",
     "webhook": "node src/webhook.js",
-    "test": "node --test"
+    "test": "node --test",
+    "artale:webhook": "node src/artale/webhook.js"
   }
 }

@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
-import { deleteDiscordMessage, editDiscordMessage, sendToDiscord } from '../src/discord.js';
-import { listPosts } from '../src/posts.js';
+import { deleteDiscordMessage, editDiscordMessage, sendToDiscord } from '../src/shared/discord.js';
+import { listPosts } from '../src/shared/posts.js';
 import { runWebhookCommand } from '../src/webhook.js';
 
 const HOOK = 'https://discord.com/api/webhooks/111111111111111111/testSecretToken';
@@ -28,7 +28,8 @@ async function setup(t, handler) {
     return json({ id: MESSAGE_ID, channel_id: '333333333333333333', ...request.payload });
   });
   const options = {
-    env: { DISCORD_WEBHOOK_URL: HOOK, DISCORD_MESSAGES_FILE: historyFile },
+    source: 'artale',
+    env: { ARTALE_DISCORD_WEBHOOK_URL: HOOK, ARTALE_DISCORD_MESSAGES_FILE: historyFile },
     output: (text) => output.push(text),
   };
   return { dir, historyFile, calls, output, options, run: (args) => runWebhookCommand(args, options) };
@@ -144,7 +145,7 @@ test('切換 Webhook 後只列出該 Webhook 的紀錄，討論串 ID 會傳入�
 
 test('紀錄寫入失敗會明確回報已成功與訊息 ID', async (t) => {
   const { run, options, dir, calls } = await setup(t);
-  options.env.DISCORD_MESSAGES_FILE = dir; // 目錄可存在，但不能作為紀錄檔 append
+  options.env.ARTALE_DISCORD_MESSAGES_FILE = dir; // 目錄可存在，但不能作為紀錄檔 append
   await assert.rejects(run(['create', '--content', '公告']), (err) => {
     assert.match(err.message, /已成功/);
     assert.ok(err.message.includes(MESSAGE_ID));
@@ -185,12 +186,42 @@ test('Webhook 及訊息 ID 驗證會在請求前完成，避免刪掉 Webhook �
 
 test('Node 入口可單獨使用，不依賴有效排程或 Codex 設定', async (t) => {
   const { historyFile } = await setup(t);
-  const { stdout } = await execute(process.execPath, ['src/webhook.js', 'create', '--content', '預覽', '--dry-run'], {
-    env: { ...process.env, DISCORD_WEBHOOK_URL: HOOK, DISCORD_MESSAGES_FILE: historyFile,
-      SCHEDULE_DAYS: 'invalid', ARTALE_NEWS_CATEGORIES: 'invalid', CODEX_BIN: '/missing-codex' },
+  const { stdout } = await execute(process.execPath, ['src/artale/webhook.js', 'create', '--content', '預覽', '--dry-run'], {
+    env: { ...process.env, ARTALE_DISCORD_WEBHOOK_URL: HOOK, ARTALE_DISCORD_MESSAGES_FILE: historyFile,
+      ARTALE_SCHEDULE_DAYS: 'invalid', ARTALE_NEWS_CATEGORIES: 'invalid', CODEX_BIN: '/missing-codex' },
   });
   assert.equal(JSON.parse(stdout).action, 'create');
   assert.ok(!stdout.includes('testSecretToken'));
+});
+
+test('共用指令依來源選擇獨立 Webhook 與紀錄，忽略舊的全域設定', async (t) => {
+  const { options, dir, calls } = await setup(t);
+  const env = { ...options.env, DISCORD_WEBHOOK_URL: 'invalid', DISCORD_MESSAGES_FILE: 'invalid',
+    STOCKS_DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/444444444444444444/stocksToken',
+    STOCKS_DISCORD_MESSAGES_FILE: path.join(dir, 'stocks.jsonl'),
+    CRYPTO_DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/555555555555555555/cryptoToken',
+    CRYPTO_DISCORD_MESSAGES_FILE: path.join(dir, 'crypto.jsonl') };
+  const run = args => runWebhookCommand(args, { ...options, source: undefined, env });
+  for (const [source, id] of [['artale', '111111111111111111'], ['stocks', '444444444444444444'], ['crypto', '555555555555555555']]) {
+    await run(['create', '--source', source, '--content', '公告']);
+    assert.match(calls.at(-1).url.pathname, new RegExp(`/webhooks/${id}/`));
+    const records = await run(['list', '--source', source]);
+    assert.equal(records.length, 1);
+    assert.equal(records[0].webhookId, id);
+  }
+  await assert.rejects(run(['create', '--content', '沒有指定來源']), /--source/);
+  env.CRYPTO_DISCORD_WEBHOOK_URL = '';
+  await assert.rejects(run(['create', '--source', 'crypto', '--content', '缺少網址']), /CRYPTO_DISCORD_WEBHOOK_URL/);
+  await assert.rejects(run(['create', '--source', 'unknown', '--content', '無效來源']), /--source/);
+  assert.equal(calls.length, 3);
+});
+
+test('Artale 發文指令不允許切換來源，仍支援明確指定其他 Webhook', async (t) => {
+  const { run, calls } = await setup(t);
+  await assert.rejects(run(['delete', '--source', 'stocks', '--message-id', MESSAGE_ID]), /固定使用 artale/);
+  assert.equal(calls.length, 0);
+  await run(['create', '--webhook', 'https://discord.com/api/webhooks/444444444444444444/anotherToken', '--content', '測試']);
+  assert.match(calls[0].url.pathname, /webhooks\/444444444444444444\//);
 });
 
 test('所有 Webhook 合計最多保留 100 筆操作，新增、修改、刪除皆移除最舊紀錄', async (t) => {
@@ -234,7 +265,7 @@ test('不同 Node 程序同時寫入，仍保留所有新操作且合計不超�
   const { historyFile } = await setup(t);
   await seedHistory(historyFile, 98);
   const source = `
-import { managePost } from ${JSON.stringify(new URL('../src/posts.js', import.meta.url).href)};
+import { managePost } from ${JSON.stringify(new URL('../src/shared/posts.js', import.meta.url).href)};
 const [historyFile, messageId] = process.argv.slice(1);
 globalThis.fetch = async () => new Response(JSON.stringify({ id: messageId }));
 await managePost('create', ${JSON.stringify(HOOK)}, { payload: { content: '並行發文' }, historyFile });

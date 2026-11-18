@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { detectChange, hashAnnouncement, loadState, recordNotified, saveState } from '../src/state.js';
+import { detectChange, hashAnnouncement, loadState, recordNotified, saveState } from '../../src/artale/state.js';
 
 const sent = (id, hash) => ({ id, hash, title: id, notifiedAt: '2026-11-17T00:00:00.000Z' });
 

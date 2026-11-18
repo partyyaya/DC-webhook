@@ -8,7 +8,7 @@ import {
   nextRunTime,
   parseDays,
   parseTime,
-} from '../src/schedule.js';
+} from '../src/shared/schedule.js';
 
 const tuesday = (overrides = {}) =>
   createSchedule({ days: '2', start: '08:20', end: '17:20', intervalMinutes: 60, timeZone: 'Asia/Taipei', ...overrides });
