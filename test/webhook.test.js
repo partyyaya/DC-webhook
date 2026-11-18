@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -33,6 +33,17 @@ async function setup(t, handler) {
   };
   return { dir, historyFile, calls, output, options, run: (args) => runWebhookCommand(args, options) };
 }
+
+async function seedHistory(file, count) {
+  await mkdir(path.dirname(file), { recursive: true });
+  const events = Array.from({ length: count }, (_, index) => ({
+    action: 'create', webhookId: index % 2 ? '111111111111111111' : '444444444444444444',
+    messageId: String(index + 1), title: `舊公告${index + 1}`, at: '2026-11-17T00:00:00.000Z',
+  }));
+  await writeFile(file, `${events.map(event => JSON.stringify(event)).join('\n')}\n`);
+}
+
+const readEvents = async file => (await readFile(file, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
 
 test('新增、修改、刪除使用正確 HTTP 路徑，並保存 ID 及最後狀態，不保存 token', async (t) => {
   const fixture = await setup(t);
@@ -180,4 +191,68 @@ test('Node 入口可單獨使用，不依賴有效排程或 Codex 設定', async
   });
   assert.equal(JSON.parse(stdout).action, 'create');
   assert.ok(!stdout.includes('testSecretToken'));
+});
+
+test('所有 Webhook 合計最多保留 100 筆操作，新增、修改、刪除皆移除最舊紀錄', async (t) => {
+  const { run, historyFile } = await setup(t);
+  await seedHistory(historyFile, 99);
+  await run(['create', '--content', '新公告']);
+  let events = await readEvents(historyFile);
+  assert.equal(events.length, 100);
+  assert.equal(events[0].messageId, '1');
+  assert.equal(events.at(-1).messageId, MESSAGE_ID);
+
+  await run(['edit', '--message-id', MESSAGE_ID, '--content', '修正版']);
+  events = await readEvents(historyFile);
+  assert.equal(events.length, 100);
+  assert.equal(events[0].messageId, '2');
+  assert.equal(events.at(-1).action, 'edit');
+
+  await run(['delete', '--message-id', MESSAGE_ID]);
+  events = await readEvents(historyFile);
+  assert.equal(events.length, 100);
+  assert.equal(events[0].messageId, '3');
+  assert.deepEqual(events.slice(-3).map(event => event.action), ['create', 'edit', 'delete']);
+  assert.equal((await run(['list']))[0].status, 'deleted');
+});
+
+test('舊檔案超過 100 筆時，下次寫入保留最後 99 筆舊紀錄加上新操作', async (t) => {
+  const { run, historyFile } = await setup(t);
+  await seedHistory(historyFile, 110);
+  const before = await readFile(historyFile, 'utf8');
+  await run(['list']);
+  await run(['create', '--content', '預覽', '--dry-run']);
+  assert.equal(await readFile(historyFile, 'utf8'), before, '查詢及預覽不應清理紀錄');
+  await run(['create', '--content', '新公告']);
+  const events = await readEvents(historyFile);
+  assert.equal(events.length, 100);
+  assert.equal(events[0].messageId, '12');
+  assert.equal(events.at(-1).messageId, MESSAGE_ID);
+});
+
+test('不同 Node 程序同時寫入，仍保留所有新操作且合計不超過 100 筆', async (t) => {
+  const { historyFile } = await setup(t);
+  await seedHistory(historyFile, 98);
+  const source = `
+import { managePost } from ${JSON.stringify(new URL('../src/posts.js', import.meta.url).href)};
+const [historyFile, messageId] = process.argv.slice(1);
+globalThis.fetch = async () => new Response(JSON.stringify({ id: messageId }));
+await managePost('create', ${JSON.stringify(HOOK)}, { payload: { content: '並行發文' }, historyFile });
+`;
+  const ids = ['900000000000000001', '900000000000000002', '900000000000000003', '900000000000000004'];
+  await Promise.all(ids.map(id => execute(process.execPath, ['--input-type=module', '-e', source, historyFile, id])));
+  const events = await readEvents(historyFile);
+  assert.equal(events.length, 100);
+  assert.equal(events[0].messageId, '3');
+  for (const id of ids) assert.ok(events.some(event => event.messageId === id));
+  await assert.rejects(access(`${historyFile}.lock`), { code: 'ENOENT' });
+});
+
+test('發文紀錄格式錯誤時不覆寫原檔，並釋放寫入鎖', async (t) => {
+  const { run, historyFile } = await setup(t);
+  await mkdir(path.dirname(historyFile), { recursive: true });
+  await writeFile(historyFile, '{broken}\n');
+  await assert.rejects(run(['create', '--content', '新公告']), /已成功.*紀錄寫入失敗/);
+  assert.equal(await readFile(historyFile, 'utf8'), '{broken}\n');
+  await assert.rejects(access(`${historyFile}.lock`), { code: 'ENOENT' });
 });

@@ -89,6 +89,7 @@ test('版本更新公告：整理更新項目，每項 50 字以內並附連結'
   const prompt = buildSummaryPrompt(announcement, 'new', 'update');
   assert.match(prompt, /這次版本更新了什麼/);
   assert.match(prompt, /不超過 50 字/);
+  assert.match(prompt, /每個更新項目之間空一行/);
   assert.match(prompt, /\[連結文字\]\(網址\)/);
   assert.doesNotMatch(prompt, /WC/);
   assert.match(prompt, /"""\n更新內容\n"""/);

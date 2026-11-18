@@ -26,13 +26,21 @@ test('組出 Discord embed，並停用 @everyone 等提及', () => {
   assert.equal(embed.title, '【新公告】11/17（二）Artale World 更新公告');
   assert.equal(embed.url, announcement.url);
   assert.equal(embed.description, '摘要內容');
-  assert.equal(embed.timestamp, '2026-11-17T00:13:00.000Z');
+  assert.equal(embed.fields, undefined);
+  assert.equal(embed.timestamp, undefined);
   assert.equal(embed.image, undefined);
 });
 
 test('公告更新使用不同標籤', () => {
   const [embed] = buildDiscordPayload(announcement, '摘要', 'updated').embeds;
   assert.match(embed.title, /^【公告更新】/);
+});
+
+test('版本更新項目之間恰好空一行，保留更新提示與項目內連結', () => {
+  const summary = '（公告已更新）\r\n- **第一項**：內容\r\n[說明](https://artale.live/tw/guide/example)\r\n- **第二項**：內容\r\n\r\n\r\n- **第三項**：內容';
+  const { description } = buildDiscordPayload(announcement, summary, 'updated').embeds[0];
+  assert.equal(description, '（公告已更新）\n\n- **第一項**：內容\n[說明](https://artale.live/tw/guide/example)\n\n- **第二項**：內容\n\n- **第三項**：內容');
+  assert.equal(buildDiscordPayload(announcement, description, 'updated').embeds[0].description, description);
 });
 
 test('過長的摘要會被截斷在 Discord 限制內', () => {
@@ -95,18 +103,15 @@ test('購物商場：每個商品先圖片卡片、再文字卡片，最後是�
   assert.equal(passText.title, '每週突襲重置獎勵通行證｜4,000 WC');
   assert.equal(
     passText.description,
-    '內容物：突襲額外入場券、凍結加持器\n[前往說明頁面](https://artale.live/tw/guide/pass)\n購買條件：角色等級 70 以上\n可購買次數：每帳號每週限購 1 次\n販售時間：11/17 維護後～11/24 維護前',
+    '- **內容物：**突襲額外入場券、凍結加持器\n[前往說明頁面](https://artale.live/tw/guide/pass)\n- **購買條件：**角色等級 70 以上\n- **可購買次數：**每帳號每週限購 1 次\n- **販售時間：**11/17 維護後～11/24 維護前',
   );
   assert.equal(giftText.title, '角色養成禮包｜4,000 WC');
   assert.equal(giftText.image, undefined);
-  assert.equal(giftText.description, '內容物：突襲額外入場券、凍結加持器');
+  assert.equal(giftText.description, '- **內容物：**突襲額外入場券、凍結加持器');
   assert.equal(others.title, '其他異動');
   assert.equal(others.description, '- 常駐禮包價格調整');
-  assert.deepEqual(others.fields, [
-    { name: '分類', value: '購物商場', inline: true },
-    { name: '發布時間', value: shopAnnouncement.publishedAt, inline: true },
-  ]);
-  assert.equal(others.timestamp, '2026-11-17T00:13:00.000Z');
+  assert.equal(others.fields, undefined);
+  assert.equal(others.timestamp, undefined);
   assert.ok(others.footer.text.includes('Codex'));
 });
 
@@ -123,7 +128,7 @@ test('購物商場：購買資訊只顯示有內容的項目並放在連結後�
   };
   const [{ embeds }] = buildShopMessages(shopAnnouncement, { products: [item], otherChanges: [] }, 'new');
   assert.equal(embeds[1].description,
-    '內容物：突襲額外入場券、凍結加持器\n[說明](https://artale.live/tw/guide/pass)\n販售時間：11/17～11/24');
+    '- **內容物：**突襲額外入場券、凍結加持器\n[說明](https://artale.live/tw/guide/pass)\n- **販售時間：**11/17～11/24');
 });
 
 test('購物商場：超過 10 張卡片時拆成多則訊息，且同一商品的圖片與文字不會被拆開', () => {
@@ -145,10 +150,9 @@ test('購物商場：超過 10 張卡片時拆成多則訊息，且同一商品�
     .filter(({ description }) => description?.includes('官網公告內文：')).length;
   assert.equal(sourceCount, 0);
   const allEmbeds = messages.flatMap(m => m.embeds);
-  assert.equal(allEmbeds.filter(e => e.fields).length, 1);
+  assert.equal(allEmbeds.filter(e => e.fields).length, 0);
   assert.equal(allEmbeds.filter(e => e.footer).length, 1);
-  assert.equal(allEmbeds.filter(e => e.timestamp).length, 1);
-  assert.equal(allEmbeds.at(-1).fields[0].value, '購物商場');
+  assert.equal(allEmbeds.filter(e => e.timestamp).length, 0);
   assert.ok(allEmbeds.at(-1).footer);
 });
 
@@ -176,8 +180,9 @@ test('購物商場：內容物過長時仍在卡片最後保留購買資訊', ()
   const [{ embeds }] = buildShopMessages(shopAnnouncement, { products: [item], otherChanges: [] }, 'new');
   const description = embeds[1].description;
   assert.ok(description.length <= 4096);
-  assert.ok(description.endsWith('購買條件：角色等級 70 以上\n可購買次數：每帳號每週限購 1 次\n販售時間：11/17 維護後～11/24 維護前'));
-  assert.equal(embeds[1].fields[0].value, '購物商場');
+  assert.ok(description.endsWith('- **購買條件：**角色等級 70 以上\n- **可購買次數：**每帳號每週限購 1 次\n- **販售時間：**11/17 維護後～11/24 維護前'));
+  assert.equal(embeds[1].fields, undefined);
+  assert.equal(embeds[1].timestamp, undefined);
 });
 
 test('購物商場只有其他異動時，截斷內文並保留標題連結', () => {
@@ -186,5 +191,6 @@ test('購物商場只有其他異動時，截斷內文並保留標題連結', ()
   assert.equal(embeds[1].description.length, 4096);
   assert.ok(embeds[1].description.endsWith('…'));
   assert.equal(embeds[0].url, shopAnnouncement.url);
-  assert.equal(embeds[1].fields[0].value, '購物商場');
+  assert.equal(embeds[1].fields, undefined);
+  assert.equal(embeds[1].timestamp, undefined);
 });

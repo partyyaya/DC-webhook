@@ -56,7 +56,7 @@ test('公告預覽不寫任何紀錄，正式發送保存訊息 ID，去重仍�
   assert.equal(record.announcementId, 'latest');
   assert.equal(record.category, 'update');
   assert.equal((await loadState(config.stateFile)).notified.length, 1);
-  assert.ok(posts[0].embeds[0].description.endsWith('https://artale.live/tw/news/latest'));
+  assert.equal(posts[0].embeds[0].url, 'https://artale.live/tw/news/latest');
   const [result] = await runOnce();
   assert.equal(result.status, 'unchanged');
   assert.equal(posts.length, 1);

@@ -8,6 +8,7 @@
 - [Discord 發布內容](#discord-發布內容)
 - [預覽與手動操作](#預覽與手動操作)
 - [管理 Discord 發文](#管理-discord-發文)
+- [刪除後重新發布](#刪除後重新發布)
 - [自動排程](#自動排程)
 - [設定參考](#設定參考)
 - [問題排查](#問題排查)
@@ -15,7 +16,7 @@
 
 ## 快速開始
 
-需要 Node.js 20.12 以上（本專案使用 Node 22）、Codex CLI 與 Discord Webhook 網址。專案本身沒有 npm 套件依賴。
+自動整理公告需要 Node.js 20.12 以上（本專案使用 Node 22）、Codex CLI 與 Discord Webhook 網址。專案本身沒有 npm 套件依賴；若只使用[管理 Discord 發文](#管理-discord-發文)指令，不需要 Codex CLI。
 
 ### 1. 準備執行環境
 
@@ -52,7 +53,7 @@ Webhook 的名稱與頭像在 Discord 設定。`.env` 已列入 `.gitignore`；�
 npm run dry-run -- --force
 ```
 
-終端機會印出兩個分類各自的 Discord JSON 資料，**不發送訊息，也不更新通知紀錄**。實際卡片外觀需在 Discord 確認。只想看其中一個分類，見[預覽與手動操作](#預覽與手動操作)。
+預設會分別印出「更新」與「購物商場」的 Discord JSON 資料，實際處理的分類由 `ARTALE_NEWS_CATEGORIES` 決定。**不發送訊息，也不更新任何通知或發文紀錄**。實際卡片外觀需在 Discord 確認。只想看其中一個分類，見[預覽與手動操作](#預覽與手動操作)。
 
 ### 4. 啟動自動排程
 
@@ -68,15 +69,18 @@ npm run schedule
 
 | 分類 | 顯示內容 | 排版 |
 | --- | --- | --- |
-| 版本更新 | 更新項目、關鍵日期與數值、相關頁面連結；每項說明要求 50 字以內 | 一張公告卡片 |
+| 版本更新 | 更新項目、關鍵日期與數值、相關頁面連結；每項說明要求 50 字以內，項目之間空一行 | 一張公告卡片 |
 | 購物商場 | 商品名稱、WC 價格、內容物名稱、圖片、相關頁面連結、購買資訊 | 公告卡片 → 各商品先圖片再文字 → 其他異動（有才顯示） |
 
-公告標題顯示於最上方；分類、發布時間與摘要說明放在內文最下方。購物商場若拆成多則訊息，這些資訊只顯示在最後一則的最後一張文字卡片。不顯示分類橫幅，保留內文商品圖片。新公告標為【新公告】，同篇內容變更標為【公告更新】，強制重發已記錄的相同版本標為【公告】。
+公告標題顯示於最上方，不顯示分類欄位、發布時間或底部時間戳。卡片底部保留「摘要由 Codex 自動產生，詳細內容請以官方公告為準」；商城拆成多則時，只放在最後一張文字卡片。不顯示分類橫幅，保留商品圖片。
+
+新公告標為【新公告】，同篇內容變更標為【公告更新】，強制重發已記錄的相同版本標為【公告】。**官網修改公告時，程式會另發一則更新訊息，保留舊訊息，不會自動刪除或覆寫。**判斷依公告 ID 與內容版本，不以是否同一天區分。
 
 **點擊公告標題即可開啟對應的官網公告**，內文不再重複附上公告網址。商品說明等內文連結仍會保留。
 
 ### 購物商場的整理規則
 
+- 「內容物、購買條件、可購買次數、販售時間」以清單呈現，欄位標題使用粗體，各項直接換行、不插入空白行，例如 `- **內容物：**道具名稱`。
 - 每個商品文字卡片最後，依序列出「購買條件、可購買次數、販售時間」；公告沒寫的項目直接省略整行。
 - 限購資訊保留帳號／角色限制、重置週期與時間；販售時間保留起訖日期及「維護前／維護後」等說明。
 - 摘要規則要求 Codex 排除下架、刪除、移除、停止販售或結束販售的商品，「其他異動」也不列入。仍在販售、只註明未來截止時間的商品會保留。
@@ -91,11 +95,11 @@ npm run schedule
 ［公告卡片］【新公告】11/17（二）Artale World 購物商場更新公告
 ［圖片卡片］（商品圖片，沒有則省略）
 ［文字卡片］每週突襲重置獎勵通行證｜4,000 WC
-           內容物：突襲額外入場券、凍結加持器、…
+           - **內容物：**突襲額外入場券、凍結加持器、…
            前往機率型道具資訊頁面（連結）
-           購買條件：等級 Lv.10 以上
-           可購買次數：每個角色限購 1 次
-           販售時間：11/17 維護後～12/15 維護前
+           - **購買條件：**等級 Lv.10 以上
+           - **可購買次數：**每個角色限購 1 次
+           - **販售時間：**11/17 維護後～12/15 維護前
 ```
 
 有多個商品時依序重複圖片與文字卡片；有其他異動時放在商品後方。
@@ -114,7 +118,7 @@ npm run schedule
 | 強制重新處理並發送最新公告 | `npm start -- --force` | 是 |
 | 執行測試 | `npm test` | 否 |
 
-`--force` 只略過版本比對，仍會套用商品排除與欄位省略規則。首次正式執行會處理各分類最新公告；實際訊息數依[發布內容](#discord-發布內容)而定。
+`--force` 只略過版本比對，仍會套用商品排除與欄位省略規則，也不會刪除舊訊息。指定 `--force` 重新處理時，會重新抓取最新公告並產生摘要，文字可能與上次不同。首次正式執行會處理各分類最新公告；實際訊息數依[發布內容](#discord-發布內容)而定。
 
 只預覽單一分類（以下適用於 macOS／Linux）：
 
@@ -177,9 +181,29 @@ node src/webhook.js create --file examples/webhook-message.json
 node src/webhook.js edit --message-id 123456789012345678 --file examples/webhook-message.json
 ```
 
-`--content` 與 `--file` 擇一。新增可讀取單一 JSON 物件或訊息物件陣列；修改只接受單一物件。JSON 檔路徑以目前執行目錄為準。
+`--content` 與 `--file` 擇一。新增可讀取單一 JSON 物件或訊息物件陣列；修改只接受單一物件。JSON 檔路徑以目前執行目錄為準。手動發文的內容與排版依 JSON 提供，不會自動套用官網公告的摘要、商品排除、粗體或空行規則。
 
 修改時未提供的欄位會保留，提供的 `embeds` 則整組取代。`--content` 只修改普通文字，不會改動既有卡片；若要將卡片改為純文字，JSON 使用 `{"content":"新文字","embeds":[]}`。所有新增與修改都停用提及通知。
+
+### 刪除後重新發布
+
+若要替換已發布的公告，先確認新內容，再用訊息 ID 刪除舊文，最後重新發送。以下只處理商城；要處理版本更新，將 `bm` 改為 `update`：
+
+```bash
+# 1. 先確認最新公告與新排版
+ARTALE_NEWS_CATEGORIES=bm npm run dry-run -- --force
+
+# 2. 查詢目前 Webhook 的訊息 ID，選擇要替換的 active 紀錄
+node src/webhook.js list
+
+# 3. 將數字換成舊公告的實際 messageId
+node src/webhook.js delete --message-id 123456789012345678
+
+# 4. 重新產生摘要並發布商城公告
+ARTALE_NEWS_CATEGORIES=bm npm start -- --force
+```
+
+商城若拆成多則，需逐則刪除該篇公告的舊訊息。若摘要成功但商城預覽為空，請先確認這是預期結果；正式執行時若仍沒有需通知內容，就不會發送。若需保持摘要文字完全相同，請先準備固定內容的 JSON 檔，並用 `create --file` 預覽及發送；`npm start -- --force` 會重新產生摘要，並不直接沿用預覽結果。
 
 ### Webhook 與訊息紀錄
 
@@ -189,13 +213,17 @@ node src/webhook.js edit --message-id 123456789012345678 --file examples/webhook
 | `--thread-id ID` | 討論串內的訊息，新增、修改、刪除時指定討論串 ID；也可放在 Webhook URL 的 `thread_id` 參數 |
 | `--history-file PATH` | 改用其他發文紀錄檔，路徑以專案根目錄為準 |
 
-發文紀錄預設寫入 `data/discord-messages.jsonl`，保存 Webhook ID、訊息 ID、標題及操作時間，不保存 Webhook token。排程發送的每則公告也會立即記錄 ID，即使後續另一則發送失敗，仍可用 `list` 找出已成功的訊息並刪除。`list` 只讀本機紀錄；有設定 Webhook 時只列出該 Webhook，未設定時列出全部。此功能加入前的舊訊息不會自動補入，仍可自行取得訊息 ID 後操作。
+發文紀錄預設寫入 `data/discord-messages.jsonl`，保存 Webhook ID、訊息 ID、標題及操作時間，不保存 Webhook token。**所有 Webhook 合計最多保留最近 100 筆操作紀錄**，每次成功的新增、修改、刪除各佔一筆；寫入第 101 筆時移除最舊的，既有超額紀錄也會在下次成功寫入時縮減至 100 筆。清理本機紀錄不會刪除 Discord 訊息。
 
-修改與刪除必須使用原本發送該訊息的 Webhook；商城拆成多則時需指定各則 ID 分別操作，見 [Discord 官方 Webhook 文件](https://docs.discord.com/developers/resources/webhook#edit-webhook-message)。手動操作不受公告去重限制，也不修改 `data/state.json`；刪除後若要重新產生公告，使用 `npm start -- --force`。
+排程發送的每則公告也會立即記錄 ID，即使後續另一則發送失敗，仍可在保留範圍內用 `list` 查詢。超出保留範圍後，可能查不到訊息或其完整資料；若已知訊息 ID，仍可搭配原 Webhook 修改或刪除。
+
+`list` 只讀本機紀錄：有設定 Webhook 時只列出該 Webhook，未設定時列出全部。`status: "active"` 表示本機尚無成功刪除紀錄，`status: "deleted"` 表示本機記錄到成功刪除；若直接在 Discord 刪除，本機狀態不會同步更新。此功能加入前的舊訊息不會自動補入，仍可自行取得訊息 ID 後操作。
+
+修改與刪除必須使用原本發送該訊息的 Webhook，見 [Discord 官方 Webhook 文件](https://docs.discord.com/developers/resources/webhook#edit-webhook-message)。`delete --message-id` 只刪除指定訊息，不會刪除 Webhook 本身。手動操作不受公告去重限制，也不修改 `STATE_FILE` 指定的公告紀錄。
 
 ## 自動排程
 
-在 `.env` 修改排程設定，重新啟動 `npm run schedule` 後生效：
+修改 `.env` 或程式後，需重新啟動常駐程式才會載入新設定與排版；已發布的訊息不會自動修改。排程可在 `.env` 設定：
 
 ```ini
 SCHEDULE_DAYS=2              # 1=週一，7=週日；支援 2,4、1-5 等寫法
@@ -223,14 +251,14 @@ pm2 start npm --name artale --no-autorestart -- run schedule
 
 ## 設定參考
 
-所有設定可寫在專案根目錄的 `.env`；相對路徑以專案根目錄為準。
+所有設定可寫在專案根目錄的 `.env`。`STATE_FILE` 與 `DISCORD_MESSAGES_FILE` 的相對路徑以專案根目錄為準；手動指令的 `--file` 則以目前執行目錄為準。
 
 | 變數 | 預設值 | 用途 |
 | --- | --- | --- |
 | `DISCORD_WEBHOOK_URL` | 無 | 正式發送及常駐排程必填；預覽不需要 |
 | `ARTALE_NEWS_CATEGORIES` | `update,bm` | 檢查哪些分類，逗號分隔 |
 | `STATE_FILE` | `data/state.json` | 公告版本紀錄檔 |
-| `DISCORD_MESSAGES_FILE` | `data/discord-messages.jsonl` | 每則 Discord 訊息的新增、修改及刪除紀錄，供 `webhook list` 查詢 |
+| `DISCORD_MESSAGES_FILE` | `data/discord-messages.jsonl` | 最多保留最近 100 筆新增、修改及刪除操作紀錄，供 `webhook list` 查詢 |
 | `CODEX_BIN` | `codex` | CLI 執行檔名稱或絕對路徑 |
 | `CODEX_MODEL` | Codex 設定檔的模型 | 摘要使用的模型 |
 | `CODEX_TIMEOUT_MS` | `300000`（5 分鐘） | 單次摘要逾時時間 |
@@ -264,7 +292,7 @@ pm2 start npm --name artale --no-autorestart -- run schedule
 | `bad CPU type in executable` | 執行 `nvm use`，確認 Node 安裝架構適合目前電腦；可用 `nvm alias default 22` 設定預設版本 |
 | 內容轉譯錯誤，排程停止 | 檢查官網結構及 `src/artale.js` 解析規則，修正後先預覽，再重新啟動排程 |
 | 修改／刪除回傳 HTTP 404 | 確認訊息 ID 與原 Webhook 正確；訊息或 Webhook 可能已刪除 |
-| 顯示 Discord 操作已成功，但發文紀錄寫入失敗 | 保留錯誤內的訊息 ID，檢查 `DISCORD_MESSAGES_FILE` 路徑與權限，避免直接重試新增造成重複發文 |
+| 顯示 Discord 操作已成功，但發文紀錄寫入失敗 | 保留錯誤內的訊息 ID，檢查 `DISCORD_MESSAGES_FILE` 路徑與權限，避免直接重試新增造成重複發文。若程序被強制中止並留下同名 `.lock` 檔，確認沒有其他程序正在寫入後再移除該鎖檔 |
 
 ### 錯誤發生後會怎樣
 
@@ -297,6 +325,8 @@ pm2 start npm --name artale --no-autorestart -- run schedule
 
 紀錄檔預設為 `data/state.json`，所有分類合計保留最近 100 筆。已記錄的相同版本會略過，超出保留範圍的舊版本則不受去重保護。商城沒有需通知內容時也會記錄，`notifiedAt` 表示完成處理的時間。
 
+**公告去重紀錄沒有區分 Webhook。**若換到另一個群組但沿用同一份 `STATE_FILE`，相同版本仍會略過；可加 `--force` 重發。兩個群組若需各自追蹤更新，請分別設定不同的 `STATE_FILE`。這與按 Webhook 區分的 `DISCORD_MESSAGES_FILE` 發文紀錄不同。
+
 需要重發時使用 `npm start -- --force`。若要清除所有紀錄，可刪除 `STATE_FILE` 指定的檔案；下次正式執行會重新處理各分類最新公告。
 
 <details>
@@ -326,7 +356,7 @@ pm2 start npm --name artale --no-autorestart -- run schedule
 | 版本更新摘要規則 | `src/summarize.js` 的 `UPDATE_PROMPT` |
 | 商城摘要、商品排除、購買資訊規則 | `src/summarize.js` 的 `SHOP_PROMPT` |
 | 各分類共用摘要規則 | `src/summarize.js` 的 `COMMON_RULES` |
-| Discord 卡片與結尾網址 | `src/discord.js` 的 `buildDiscordPayload()`、`buildShopMessages()` |
+| Discord 卡片、粗體、行距與標題連結 | `src/discord.js` 的 `buildDiscordPayload()`、`buildShopMessages()` |
 
 商城摘要使用固定 JSON Schema。程式會核對商品圖片及頁面連結網址是否出現在原文中；其他分類的連結由摘要規則要求照抄，未另做網址核對。正式模式下，摘要解析檢查失敗就不發送該分類。
 

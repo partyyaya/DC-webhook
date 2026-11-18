@@ -2,10 +2,9 @@
  * Discord 模組：把公告與摘要組成 Discord embed（卡片樣式訊息），並透過 Webhook 發送。
  *
  * 在頻道中顯示的樣子：
- *   - 版本更新：一張卡片，包含標題（可點擊開啟官網公告）、摘要內文、「分類」與「發布時間」欄位、
- *     底部說明文字與發布時間。
+ *   - 版本更新：一張卡片，包含標題（可點擊開啟官網公告）、項目之間空一行的摘要內文與底部說明。
  *   - 購物商場：先一張公告標題卡片，接著每個商品「先圖片卡片、再文字卡片」，
- *     最後是「其他異動」卡片；分類、發布時間與底部說明放在最後一張文字卡片。
+ *     最後是「其他異動」卡片；底部說明放在最後一張文字卡片。
  *     卡片太多時會拆成好幾則訊息依序發送。
  *     （Discord 卡片的大圖固定顯示在文字下方，所以圖片要放在獨立的卡片才能排在文字前面）
  *   - 各分類獨立發送，透過公告標題連至官網，內文不重複附上公告網址。
@@ -40,28 +39,19 @@ export function buildDiscordMessages(announcement, summary, kind) {
 }
 
 /**
- * 組出公告卡片：標題、連結、顏色、「分類」與「發布時間」欄位、底部文字、發布時間。
+ * 組出公告卡片：標題、連結、顏色與底部文字，不顯示分類及發布時間。
  *
  * @param {object} announcement 公告資料（title、url、category、publishedAt、thumbnail）
  * @param {'new' | 'updated' | 'unchanged'} kind 比對結果，決定標題標籤
  * @returns {object} Discord embed
  */
 function buildHeaderEmbed(announcement, kind) {
-  const embed = {
+  return {
     title: truncate(`${LABELS[kind] ?? '【公告】'}${announcement.title}`, TITLE_LIMIT),
     url: announcement.url,
     color: EMBED_COLOR,
-    fields: [
-      { name: '分類', value: announcement.category || '公告', inline: true },
-      { name: '發布時間', value: announcement.publishedAt || '未知', inline: true },
-    ],
     footer: { text: '摘要由 Codex 自動產生，詳細內容請以官方公告為準' },
   };
-
-  // 有發布時間就顯示在卡片底部（Discord 會依觀看者的時區顯示）；不附上公告分類橫幅
-  const timestamp = toIsoTimestamp(announcement.publishedAt);
-  if (timestamp) embed.timestamp = timestamp;
-  return embed;
 }
 
 /**
@@ -73,9 +63,11 @@ function buildHeaderEmbed(announcement, kind) {
  * @returns {object} Discord Webhook 的請求內容
  */
 export function buildDiscordPayload(announcement, summary, kind) {
+  // 統一頂層項目間的空白，即使 Codex 未依格式輸出也保留一行間距。
+  const spacedSummary = summary.replace(/\r\n?/g, '\n').replace(/\n(?:[ \t]*\n)*(?=- )/g, '\n\n');
   const embed = {
     ...buildHeaderEmbed(announcement, kind),
-    description: truncate(summary, DESCRIPTION_LIMIT),
+    description: truncate(spacedSummary, DESCRIPTION_LIMIT),
   };
   return { allowed_mentions: NO_MENTIONS, embeds: [embed] };
 }
@@ -94,14 +86,14 @@ export function buildShopMessages(announcement, { products, otherChanges }, kind
   if (products.length === 0 && otherChanges.length === 0) return [];
 
   // 公告卡片；公告內容被修改時在卡片內文註明
-  const { fields, footer, timestamp, ...header } = buildHeaderEmbed(announcement, kind);
+  const { footer, ...header } = buildHeaderEmbed(announcement, kind);
   if (kind === 'updated') header.description = '（公告已更新）';
 
   // 每個商品先圖片、再文字；購買條件、可購買次數與販售時間依序放在文字卡片最後
   const groups = products.map((product) => {
     const descriptionLimit = DESCRIPTION_LIMIT;
     const lines = [
-      `內容物：${product.contents.length > 0 ? product.contents.join('、') : '公告未列出'}`,
+      `- **內容物：**${product.contents.length > 0 ? product.contents.join('、') : '公告未列出'}`,
       ...product.links.map((link) => `[${link.text.replace(/[[\]]/g, '')}](${link.url})`),
     ];
     const purchaseDetails = truncate([
@@ -110,7 +102,7 @@ export function buildShopMessages(announcement, { products, otherChanges }, kind
       ['販售時間', product.salePeriod],
     ]
       .filter(([, value]) => typeof value === 'string' && value.trim() && value.trim() !== '公告未註明')
-      .map(([label, value]) => `${label}：${value.trim()}`)
+      .map(([label, value]) => `- **${label}：**${value.trim()}`)
       .join('\n'), descriptionLimit - 2);
     const suffix = purchaseDetails ? `\n${purchaseDetails}` : '';
     const textEmbed = {
@@ -133,10 +125,8 @@ export function buildShopMessages(announcement, { products, otherChanges }, kind
     ]);
   }
 
-  // 公告資訊放在整篇最後一張文字卡片，先加入再計算分頁的字數限制。
-  Object.assign(groups.at(-1).at(-1), {
-    fields, footer, ...(timestamp ? { timestamp } : {}),
-  });
+  // 摘要說明放在整篇最後一張文字卡片，先加入再計算分頁的字數限制。
+  groups.at(-1).at(-1).footer = footer;
 
   // 依序把每組卡片裝進訊息；放不下（超過 10 張或 6000 字）就開始下一則訊息
   const messages = [];
