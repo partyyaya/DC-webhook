@@ -34,8 +34,8 @@ function positiveIntFromEnv(name, fallback) {
 
 // 全專案共用的設定值，各欄位的說明與預設值請參考 README 的「環境變數」章節。
 export const config = {
-  // 要檢查的公告分類（預設「更新」與「購物商場」），每個分類各自比對最新的一篇公告
-  newsCategories: parseCategories(process.env.ARTALE_NEWS_CATEGORIES || 'update,bm'),
+  // 預設檢查「維護」、「更新」與「購物商場」，發送優先順序由 run.js 固定
+  newsCategories: parseCategories(process.env.ARTALE_NEWS_CATEGORIES || 'maintenance,update,bm'),
   // Discord Webhook 網址（必填，在 run.js / scheduler.js 檢查）
   discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL || '',
   // 已發送公告版本的紀錄檔，相對路徑以專案根目錄為準

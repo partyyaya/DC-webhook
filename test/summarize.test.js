@@ -6,6 +6,7 @@ import { after, before, test } from 'node:test';
 import { buildDiscordMessages } from '../src/discord.js';
 import {
   buildSummaryPrompt,
+  parseMaintenanceSummary,
   parseShopSummary,
   previewShopSummary,
   SHOP_SCHEMA,
@@ -93,6 +94,31 @@ test('版本更新公告：整理更新項目，每項 50 字以內並附連結'
   assert.match(prompt, /\[連結文字\]\(網址\)/);
   assert.doesNotMatch(prompt, /WC/);
   assert.match(prompt, /"""\n更新內容\n"""/);
+});
+
+test('維護公告只擷取維護時段，更新時也不在內文加入其他文字', () => {
+  const announcement = { title: '維護公告', category: '維護', publishedAt: '2026.11.17 08:00', content: '維護及補償資訊' };
+  const prompt = buildSummaryPrompt(announcement, 'updated', 'maintenance');
+  assert.match(prompt, /periods：/);
+  assert.match(prompt, /日期、開始時間、結束時間/);
+  assert.match(prompt, /不要把公告發布時間/);
+  assert.match(prompt, /補償/);
+  assert.doesNotMatch(prompt, /這次版本更新了什麼|每個更新項目|（公告已更新）/);
+});
+
+test('維護摘要只輸出時間欄位，去除空白及重複時段', () => {
+  assert.equal(parseMaintenanceSummary(JSON.stringify({
+    periods: [' 11/24 07:00～12:00（GMT+8） ', '11/24 07:00～12:00（GMT+8）', '', '平台維護：11/24 06:00～07:00'],
+    compensation: '不應顯示的補償內容',
+  })), '維護時間：11/24 07:00～12:00（GMT+8）\n維護時間：平台維護：11/24 06:00～07:00');
+  assert.equal(parseMaintenanceSummary('{"periods":[]}'), '維護時間：公告未註明');
+});
+
+test('維護摘要不是時間 JSON 格式時拋錯，不回傳完整公告', () => {
+  assert.throws(() => parseMaintenanceSummary('維護公告全文'), /不是有效的 JSON/);
+  for (const data of [null, {}, { periods: '時間' }, { periods: [123] }]) {
+    assert.throws(() => parseMaintenanceSummary(JSON.stringify(data)), /格式不符/);
+  }
 });
 
 test('購物商場公告：要求以 JSON 整理商品、WC 價格、內容物、圖片與連結', () => {

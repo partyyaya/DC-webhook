@@ -1,8 +1,9 @@
 /**
  * 摘要模組：組出給 Codex 的提示詞，並以非互動模式呼叫 Codex CLI 產生繁體中文摘要。
  *
- * 依分類產生兩種摘要：
- *   - 版本更新（購物商場以外的分類）：Codex 直接寫出 Markdown 文字，放進一張 Discord 卡片。
+ * 依分類產生三種摘要：
+ *   - 版本更新（購物商場、維護以外的分類）：Codex 直接寫出 Markdown 文字，放進一張 Discord 卡片。
+ *   - 維護：Codex 依 MAINTENANCE_SCHEMA 擷取維護時段，只輸出維護時間。
  *   - 購物商場：Codex 依 SHOP_SCHEMA 回覆 JSON（每個商品的名稱、價格、內容物、圖片、連結與購買資訊），
  *     再由 discord.js 組成「先圖片、再文字」的多張卡片。
  *
@@ -16,7 +17,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-// 「版本更新」公告的提示詞（購物商場以外的分類都使用這組）：整理這次版本更新了什麼
+// 「版本更新」公告的提示詞（購物商場、維護以外的分類使用這組）。
 const UPDATE_PROMPT = {
   intro:
     '你是 Artale（楓之谷世界）官方公告的整理助手。請閱讀下方公告，以繁體中文（台灣用語）整理「這次版本更新了什麼」，給 Discord 玩家快速瀏覽。',
@@ -27,6 +28,18 @@ const UPDATE_PROMPT = {
     '- 若公告中該項目附有頁面連結，在該行最後附上 Markdown 連結，格式為「[連結文字](網址)」；只附公告裡實際出現的頁面連結，不要附圖片網址，也不要自行編造連結。',
     '- 只輸出上述內容，不要加開頭的主旨句、前言或結語；不要使用標題（#）或表格。',
     '- 全文不超過 3500 字。',
+  ],
+};
+
+// 維護公告只擷取時間，不將補償、活動、維護項目等其他資訊放入 Discord 內文。
+const MAINTENANCE_PROMPT = {
+  intro: '你是 Artale（楓之谷世界）官方公告的整理助手。請閱讀下方維護公告，以繁體中文（台灣用語）擷取「維護時間」，填入指定的 JSON 欄位。',
+  rules: [
+    '- periods：維護時段的文字陣列，每個時段一筆，保留日期、開始時間、結束時間及原文註明的時區；未提供的年份、時間或時區不要自行推算或補上。',
+    '- 有更正、延長、提前結束或實際完成時間時，採用公告最新說明；明確尚未確定的結束時間可保留「結束時間未定／延長中」等原意。',
+    '- 有多個適用平台或服務的維護時段時分別列出，可用簡短的服務名稱區別，但只填與維護時間有關的資訊。',
+    '- 不要填入維護項目、原因、補償、活動、注意事項、頁面連結或其他說明；不要把公告發布時間、獎勵領取日期或活動時間當成維護時間。',
+    '- 公告沒有提供任何維護時間時，periods 填空陣列，不要臆測。',
   ],
 };
 
@@ -89,6 +102,13 @@ export const SHOP_SCHEMA = {
   additionalProperties: false,
 };
 
+export const MAINTENANCE_SCHEMA = {
+  type: 'object',
+  properties: { periods: { type: 'array', items: { type: 'string' } } },
+  required: ['periods'],
+  additionalProperties: false,
+};
+
 // 所有分類共用的撰寫規則
 const COMMON_RULES = [
   '- 只根據公告內容撰寫，不要臆測或加入公告沒有的資訊。',
@@ -101,18 +121,19 @@ const COMMON_RULES = [
  *
  * @param {object} announcement 公告資料（title、category、publishedAt、content）
  * @param {'new' | 'updated' | 'unchanged'} kind 比對結果；版本更新格式在 updated 時會要求在最前面註明已更新
- *   （購物商場格式由 discord.js 在公告卡片上註明，不需要 Codex 處理）
- * @param {string} [category] 分類代碼；bm（購物商場）使用商品 JSON 格式，其他分類使用版本更新格式
+ *   （購物商場、維護的更新狀態由 Discord 卡片處理）
+ * @param {string} [category] bm 使用商品 JSON，maintenance 使用維護時段 JSON，其他使用版本更新格式
  * @returns {string} 提示詞
  */
 export function buildSummaryPrompt(announcement, kind, category) {
   // 依分類選擇角色設定與專屬規則
   const isShop = category === 'bm';
-  const { intro, rules } = isShop ? SHOP_PROMPT : UPDATE_PROMPT;
+  const isMaintenance = category === 'maintenance';
+  const { intro, rules } = isShop ? SHOP_PROMPT : isMaintenance ? MAINTENANCE_PROMPT : UPDATE_PROMPT;
   const lines = [intro, '', '撰寫規則：', ...rules];
 
   // 同一篇公告內容被修改時，多加一條規則，讓讀者知道這是更新版
-  if (kind === 'updated' && !isShop) {
+  if (kind === 'updated' && !isShop && !isMaintenance) {
     lines.push('- 這是先前已通知過的公告修改後的版本，請在最前面單獨加一行「（公告已更新）」。');
   }
 
@@ -132,6 +153,17 @@ export function buildSummaryPrompt(announcement, kind, category) {
     '"""',
   );
   return lines.join('\n');
+}
+
+/** 只使用維護時段欄位組成內文，避免其他公告內容被帶入。 */
+export function parseMaintenanceSummary(text) {
+  let data;
+  try { data = JSON.parse(text); } catch { throw new Error('Codex 回覆的維護時間不是有效的 JSON'); }
+  if (!data || !Array.isArray(data.periods) || data.periods.some(period => typeof period !== 'string')) {
+    throw new Error('Codex 回覆的維護時間格式不符');
+  }
+  const periods = [...new Set(data.periods.map(period => period.trim()).filter(Boolean))];
+  return periods.length > 0 ? periods.map(period => `維護時間：${period}`).join('\n') : '維護時間：公告未註明';
 }
 
 /**
@@ -223,7 +255,7 @@ export function previewShopSummary(content) {
  * @param {string} options.bin Codex CLI 執行檔名稱或路徑
  * @param {string} [options.model] 指定模型，空字串代表使用 Codex 設定檔的預設模型
  * @param {number} options.timeoutMs 執行逾時時間，超過會強制終止
- * @param {object} [options.schema] JSON Schema；有指定時要求 Codex 回覆符合此格式的 JSON（購物商場使用）
+ * @param {object} [options.schema] JSON Schema；有指定時要求 Codex 回覆符合此格式的 JSON（購物商場與維護使用）
  * @returns {Promise<string>} 摘要文字（有指定 schema 時為 JSON 字串）
  */
 export async function summarizeWithCodex(prompt, { bin, model, timeoutMs, schema }) {
@@ -238,7 +270,7 @@ export async function summarizeWithCodex(prompt, { bin, model, timeoutMs, schema
   //   --sandbox read-only     唯讀沙箱，Codex 無法修改任何檔案
   //   --color never           輸出不含顏色控制碼
   //   --output-last-message   把最終回覆（摘要）寫到指定檔案
-  //   --output-schema         （購物商場）要求最終回覆符合指定的 JSON Schema
+  //   --output-schema         （購物商場、維護）要求最終回覆符合指定的 JSON Schema
   //   -                       從 stdin 讀取提示詞
   const args = [
     'exec',

@@ -1,7 +1,7 @@
 /**
  * 主流程模組：把各模組串起來，完成一次完整的公告檢查。
  *
- * 依 ARTALE_NEWS_CATEGORIES 設定的分類（預設「更新」與「購物商場」）分兩個階段處理：
+ * 依 ARTALE_NEWS_CATEGORIES 設定的分類（預設「維護」、「更新」與「購物商場」）分兩個階段處理：
  *
  *   第一階段：抓取並轉譯每個分類最新的一篇公告  （artale.js）
  *     任何一個分類發生「內容轉譯錯誤」（ContentParseError，通常是官網結構改變），
@@ -17,6 +17,7 @@
  * index.js（單次執行）與 scheduler.js（常駐排程）都是呼叫這裡的 runOnce()。
  */
 import { categoryUrl, fetchLatestAnnouncement, NEWS_CATEGORIES } from './artale.js';
+import { getPublishedTime } from './announcement-dates.js';
 import { config } from './config.js';
 import { buildDiscordMessages } from './discord.js';
 import { managePost } from './posts.js';
@@ -25,6 +26,8 @@ import { log, logError } from './log.js';
 import { detectChange, hashAnnouncement, loadState, recordNotified, saveState } from './state.js';
 import {
   buildSummaryPrompt,
+  MAINTENANCE_SCHEMA,
+  parseMaintenanceSummary,
   parseShopSummary,
   previewShopSummary,
   SHOP_SCHEMA,
@@ -38,6 +41,8 @@ const CHANGE_MESSAGES = {
   unchanged: '已指定 --force，略過比對並重新發送…',
 };
 
+const NOTIFICATION_PRIORITY = { maintenance: 0, update: 1, bm: 2 };
+
 /**
  * 執行一次完整的公告檢查。
  *
@@ -49,7 +54,7 @@ const CHANGE_MESSAGES = {
  * @param {object} [options]
  * @param {boolean} [options.dryRun=false] 預覽模式：印出將發送的內容，但不發送 Discord、不寫入紀錄
  * @param {boolean} [options.force=false] 忽略比對結果，即使沒有變化也重新發送
- * @returns {Promise<Array<{category: string, status: 'unchanged' | 'dry-run' | 'sent', announcement: object, messages?: object[]}>>}
+ * @returns {Promise<Array<{category: string, status: 'unchanged' | 'outdated' | 'unavailable' | 'dry-run' | 'sent', announcement: object, messages?: object[]}>>}
  */
 export async function runOnce({ dryRun = false, force = false } = {}) {
   // 正式發送前先確認 Webhook 已設定（預覽模式不需要）
@@ -58,11 +63,15 @@ export async function runOnce({ dryRun = false, force = false } = {}) {
   }
 
   const failedLabels = [];
+  const selected = new Set(config.newsCategories);
+  const fetchCategories = [...selected];
+  // 只選維護時，也需要讀取版本更新公告作發布時間比對，但不因此發送版本更新。
+  if (selected.has('maintenance') && !selected.has('update')) fetchCategories.push('update');
 
   // 第一階段：抓取並轉譯所有分類的最新公告。全部成功後才進入發送階段，
   // 確保只要有任何一個分類轉譯錯誤，這次就一則訊息都不會發出去。
   const fetched = [];
-  for (const category of config.newsCategories) {
+  for (const category of fetchCategories) {
     const label = NEWS_CATEGORIES[category];
     try {
       const announcement = await fetchLatestAnnouncement({
@@ -85,8 +94,25 @@ export async function runOnce({ dryRun = false, force = false } = {}) {
   // 每個分類發送成功後會更新紀錄，再交給下一個分類比對。
   let state = await loadState(config.stateFile);
   const results = [];
-  for (const item of fetched) {
+  const latestUpdate = fetched.find(item => item.category === 'update')?.announcement;
+  const notifications = fetched.filter(item => selected.has(item.category))
+    .sort((a, b) => (NOTIFICATION_PRIORITY[a.category] ?? 3) - (NOTIFICATION_PRIORITY[b.category] ?? 3));
+  for (const item of notifications) {
     try {
+      if (item.category === 'maintenance') {
+        if (!latestUpdate) {
+          logError('[維護] 無法取得版本更新公告作發布時間比對，這次略過維護公告，下次檢查再試。');
+          results.push({ category: item.category, status: 'unavailable', state, announcement: item.announcement });
+          continue;
+        }
+        const updateTime = getPublishedTime(latestUpdate);
+        const maintenanceTime = getPublishedTime(item.announcement);
+        if (updateTime !== undefined && maintenanceTime !== undefined && updateTime > maintenanceTime) {
+          log(`[維護] 版本更新發布時間 ${latestUpdate.publishedAt || latestUpdate.date} 晚於維護公告發布時間 ${item.announcement.publishedAt || item.announcement.date}，略過維護公告。`);
+          results.push({ category: item.category, status: 'outdated', state, announcement: item.announcement });
+          continue;
+        }
+      }
       const result = await notifyIfChanged(item, state, { dryRun, force });
       state = result.state;
       results.push(result);
@@ -167,21 +193,27 @@ async function notifyIfChanged({ category, label, announcement }, state, { dryRu
 /**
  * 呼叫 Codex 產生摘要。
  *   - 購物商場（bm）：要求 Codex 回覆 SHOP_SCHEMA 格式的 JSON，解析後回傳商品資料。
+ *   - 維護（maintenance）：要求 Codex 回覆 MAINTENANCE_SCHEMA，僅組成維護時間內文。
  *   - 其他分類：回傳 Codex 寫好的文字摘要。
  * 正式模式下 Codex 失敗（或回覆格式不符）就直接拋錯（不發送、不記錄，等下次重試）；
  * 預覽模式下則改用預覽內容代替，讓還沒安裝 Codex 時也能看到訊息長相。
  *
  * @param {object} announcement 公告資料（含標題、內文等）
  * @param {'new' | 'updated' | 'unchanged'} kind 比對結果
- * @param {string} category 分類代碼，決定使用哪一種摘要格式（購物商場或版本更新）
+ * @param {string} category 分類代碼，決定使用購物商場、維護時間或版本更新格式
  * @param {boolean} dryRun 是否為預覽模式
  * @param {(message: string) => void} say 帶分類名稱的紀錄輸出函式
  * @returns {Promise<string | {products: object[], otherChanges: string[]}>} 文字摘要或購物商場的商品資料
  */
 async function summarize(announcement, kind, category, dryRun, say) {
   const isShop = category === 'bm';
+  const isMaintenance = category === 'maintenance';
   const prompt = buildSummaryPrompt(announcement, kind, category);
   try {
+    if (isMaintenance) {
+      const reply = await summarizeWithCodex(prompt, { ...config.codex, schema: MAINTENANCE_SCHEMA });
+      return parseMaintenanceSummary(reply);
+    }
     if (isShop) {
       const reply = await summarizeWithCodex(prompt, { ...config.codex, schema: SHOP_SCHEMA });
       return parseShopSummary(reply, announcement.content);
@@ -190,6 +222,8 @@ async function summarize(announcement, kind, category, dryRun, say) {
   } catch (err) {
     if (!dryRun) throw err;
     say(`Codex 摘要失敗，--dry-run 改用預覽內容代替：${err.message}`);
+    // 維護預覽失敗時也不能回退成公告全文，以免混入時間以外的內容。
+    if (isMaintenance) return '維護時間：尚未取得（預覽模式）';
     return isShop
       ? previewShopSummary(announcement.content)
       : `（Codex 摘要失敗，以下為公告開頭內容）\n\n${announcement.content.slice(0, 1500)}`;
