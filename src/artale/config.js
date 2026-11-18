@@ -5,31 +5,13 @@
 import path from 'node:path';
 import { parseCategories } from './client.js';
 import { createSchedule } from '../shared/schedule.js';
-import { loadProjectEnv, ROOT_DIR } from '../shared/env.js';
+import { loadProjectEnv, positiveIntFromEnv, ROOT_DIR } from '../shared/env.js';
 
 // 由共用 env.js 取得專案根目錄，用來組出環境檔與狀態檔的絕對路徑，
 // 不受 Artale 模組所在位置與目前執行目錄影響。
 export { ROOT_DIR };
 
 loadProjectEnv('artale');
-
-/**
- * 讀取一個「正整數」型態的環境變數。
- * 沒有設定時回傳預設值；設定了但不是正整數時直接拋錯，避免帶著錯誤設定繼續執行。
- *
- * @param {string} name 環境變數名稱
- * @param {number} fallback 未設定時使用的預設值
- * @returns {number}
- */
-function positiveIntFromEnv(name, fallback) {
-  const raw = process.env[name];
-  if (raw === undefined || raw === '') return fallback;
-  const value = Number(raw);
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new Error(`環境變數 ${name} 必須是正整數，目前為「${raw}」`);
-  }
-  return value;
-}
 
 // Artale 使用的設定值，各欄位的說明與預設值請參考 docs/artale.md 的「設定參考」章節。
 export const config = {

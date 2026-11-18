@@ -2,7 +2,7 @@
 
 提供共用的 Discord Webhook 發文管理、Codex 摘要執行器、排程時間計算與訊息操作紀錄。各主題的公告來源、設定、指令與規則放在各自的文件中。
 
-**主題文件：[Artale 通知](docs/artale.md)**
+**主題文件：[Artale 通知](docs/artale.md) · [Crypto 每日新聞](docs/crypto.md)**
 
 ## 目錄
 
@@ -48,6 +48,8 @@ cp env/.env.shared.example env/.env.shared
 
 各主題使用自己的 Webhook、排程與去重紀錄設定。具體變數、預設值及啟動指令請查看該主題文件；共用設定不決定任何主題的輪詢時間。修改設定後，需重新啟動對應的常駐程式。
 
+不同主題的常駐排程是各自獨立的程式，可以在不同終端機同時執行，例如 `npm run artale:schedule` 與 `npm run crypto:schedule`。同一個主題的排程不要同時開兩份，否則會重複發送。
+
 ## 共用設定
 
 以下設定放在 `env/.env.shared`，由共用 Codex CLI 執行器使用：
@@ -56,10 +58,10 @@ cp env/.env.shared.example env/.env.shared
 | --- | --- | --- |
 | `CODEX_BIN` | `codex` | CLI 執行檔名稱或絕對路徑 |
 | `CODEX_MODEL` | Codex 設定檔的模型 | 摘要使用的模型 |
-| `CODEX_TIMEOUT_MS` | `300000`（5 分鐘） | 單次摘要逾時時間，與公告輪詢間隔分開 |
+| `CODEX_TIMEOUT_MS` | `300000`（5 分鐘） | 單次摘要逾時時間，與公告輪詢間隔分開；Crypto 網路搜尋另用 `CRYPTO_CODEX_TIMEOUT_MS` |
 | `CODEX_API_KEY` | 使用 CLI 已儲存的登入資訊 | 以 API key 執行時提供，由子程序繼承 |
 
-本專案使用 `codex exec`，沿用 CLI 已儲存的登入資訊，也可透過 `CODEX_API_KEY` 提供 API key，詳見 [OpenAI 官方文件](https://learn.chatgpt.com/docs/non-interactive-mode#authenticate-in-automation)。各主題提供自己的提示詞與輸出 Schema。
+本專案使用 `codex exec`，沿用 CLI 已儲存的登入資訊，也可透過 `CODEX_API_KEY` 提供 API key，詳見 [OpenAI 官方文件](https://learn.chatgpt.com/docs/non-interactive-mode#authenticate-in-automation)。各主題提供自己的提示詞與輸出 Schema；需要最新資訊的主題（Crypto）會以 `-c web_search="live"` 開放即時網路搜尋。
 
 路徑規則：通知紀錄、發文紀錄及 `--history-file` 的相對路徑以專案根目錄為準；手動發文的 `--file` 以目前執行目錄為準。
 
@@ -71,11 +73,11 @@ cp env/.env.shared.example env/.env.shared
 npm run webhook -- --help
 ```
 
-也可執行 `node src/webhook.js <操作> ...`。支援的來源名稱為 `artale`、`stocks`、`crypto`；來源名稱用來選擇設定，不代表已實作該來源的自動公告服務。
+也可執行 `node src/webhook.js <操作> ...`。支援的來源名稱為 `artale`、`crypto`。
 
 ### 選擇設定來源
 
-`--source` 依來源名稱讀取 `env/.env.<來源>` 中的專屬 Webhook 與發文紀錄設定。例如選擇 `crypto`，就從 `env/.env.crypto` 讀取 `CRYPTO_DISCORD_WEBHOOK_URL` 與 `CRYPTO_DISCORD_MESSAGES_FILE`，不回退至其他來源或舊的全域設定。股票與虛擬幣的手動管理範例檔為 [env/.env.stocks.example](env/.env.stocks.example)、[env/.env.crypto.example](env/.env.crypto.example)。
+`--source` 依來源名稱讀取 `env/.env.<來源>` 中的專屬 Webhook 與發文紀錄設定。例如選擇 `crypto`，就從 `env/.env.crypto` 讀取 `CRYPTO_DISCORD_WEBHOOK_URL` 與 `CRYPTO_DISCORD_MESSAGES_FILE`，不回退至其他來源或舊的全域設定。
 
 | 選項 | 用途 |
 | --- | --- |
@@ -166,7 +168,7 @@ npm test
 | 分來源環境檔載入與專案路徑 | `src/shared/env.js` |
 | 紀錄輸出 | `src/shared/log.js` |
 
-新增主題時，建立專屬模組、指令、設定前綴與說明文件；各主題分開執行。股票與虛擬幣目前只有共用手動 Webhook 工具支援，尚未加入自動公告抓取或排程服務。
+新增主題時，建立專屬模組、指令、設定前綴與說明文件，並將來源名稱加入 `src/shared/env.js` 的 `SOURCES`；各主題分開執行。
 
 ## 專案結構
 
@@ -185,6 +187,7 @@ npm test
 ├── src/
 │   ├── shared/         # 共用 Discord、Codex、排程與環境工具
 │   ├── webhook.js      # 共用手動發文管理入口
-│   └── artale/         # 主題模組，詳見專屬文件
+│   ├── artale/         # Artale 公告通知，詳見專屬文件
+│   └── crypto/         # 每日美國經濟與虛擬貨幣新聞，詳見專屬文件
 └── test/               # 共用與各主題測試
 ```

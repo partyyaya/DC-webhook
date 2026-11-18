@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   createSchedule,
+  dateKeyInZone,
   describeSchedule,
+  formatDateInZone,
   formatInZone,
   isWithinSchedule,
+  latestRunTimeToday,
   nextRunTime,
   parseDays,
   parseTime,
@@ -90,4 +93,35 @@ test('判斷是否在排程時段內', () => {
 
 test('以排程時區格式化時間', () => {
   assert.equal(formatInZone(taipei('2026-11-24 08:20'), 'Asia/Taipei'), '2026-11-24（週二）08:20');
+});
+
+test('每日一次的排程：說明文字、下一次時間與當天已到的時間點', () => {
+  const daily = createSchedule({ days: '1-7', start: '08:00', end: '08:00', intervalMinutes: 1440, timeZone: 'Asia/Taipei' });
+  assert.equal(describeSchedule(daily), '每天 08:00 執行一次（時區 Asia/Taipei）');
+  assert.equal(nextRunTime(taipei('2026-11-18 07:59'), daily).getTime(), taipei('2026-11-18 08:00').getTime());
+  assert.equal(nextRunTime(taipei('2026-11-18 08:00'), daily).getTime(), taipei('2026-11-19 08:00').getTime());
+
+  assert.equal(latestRunTimeToday(taipei('2026-11-18 07:59'), daily), null);
+  assert.equal(latestRunTimeToday(taipei('2026-11-18 08:00'), daily).getTime(), taipei('2026-11-18 08:00').getTime());
+  assert.equal(latestRunTimeToday(taipei('2026-11-18 23:59'), daily).getTime(), taipei('2026-11-18 08:00').getTime());
+
+  // 平日才發送：週六（2026-11-21）沒有排程時間點
+  const weekdays = createSchedule({ days: '1-5', start: '08:00', end: '08:00', intervalMinutes: 1440, timeZone: 'Asia/Taipei' });
+  assert.equal(describeSchedule(weekdays), '每週一、週二、週三、週四、週五 08:00 執行一次（時區 Asia/Taipei）');
+  assert.equal(latestRunTimeToday(taipei('2026-11-21 12:00'), weekdays), null);
+  assert.equal(nextRunTime(taipei('2026-11-21 12:00'), weekdays).getTime(), taipei('2026-11-23 08:00').getTime());
+});
+
+test('多次排程時，當天已到的時間點為最近一次', () => {
+  assert.equal(latestRunTimeToday(taipei('2026-11-17 10:00'), tuesday()).getTime(), taipei('2026-11-17 09:20').getTime());
+  assert.equal(latestRunTimeToday(taipei('2026-11-17 23:00'), tuesday()).getTime(), taipei('2026-11-17 17:20').getTime());
+  assert.equal(latestRunTimeToday(taipei('2026-11-18 10:00'), tuesday()), null);
+});
+
+test('依排程時區取得日期', () => {
+  // UTC 2026-11-17 16:30 在台灣已是 11/18（週三）
+  const instant = new Date('2026-11-17T16:30:00Z');
+  assert.equal(dateKeyInZone(instant, 'Asia/Taipei'), '2026-11-18');
+  assert.equal(dateKeyInZone(instant, 'UTC'), '2026-11-17');
+  assert.equal(formatDateInZone(instant, 'Asia/Taipei'), '2026-11-18（週三）');
 });

@@ -149,17 +149,65 @@ export function isWithinSchedule(date, { days, start, end, timeZone }) {
 
 /**
  * 把排程設定轉成易讀的中文說明，例如「每週二 08:20～17:20，每 60 分鐘檢查一次（時區 Asia/Taipei）」。
+ * 開始與結束時間相同時（每日一次的排程），說明為「每天 08:00 執行一次（時區 Asia/Taipei）」。
  *
  * @param {object} schedule createSchedule() 的結果
  * @returns {string}
  */
 export function describeSchedule({ days, start, end, intervalMinutes, timeZone }) {
-  // 依週一到週日的順序列出星期
-  const dayText = [1, 2, 3, 4, 5, 6, 0]
-    .filter((day) => days.has(day))
-    .map((day) => `週${WEEKDAY_NAMES[day]}`)
-    .join('、');
+  // 依週一到週日的順序列出星期；七天都有時寫成「每天」
+  const dayText = days.size === 7
+    ? '天'
+    : [1, 2, 3, 4, 5, 6, 0]
+      .filter((day) => days.has(day))
+      .map((day) => `週${WEEKDAY_NAMES[day]}`)
+      .join('、');
+  if (start === end) return `每${dayText} ${formatMinutes(start)} 執行一次（時區 ${timeZone}）`;
   return `每${dayText} ${formatMinutes(start)}～${formatMinutes(end)}，每 ${intervalMinutes} 分鐘檢查一次（時區 ${timeZone}）`;
+}
+
+/**
+ * 取得 now 當天（以排程時區計算）已經到達的最後一個排程時間點。
+ * 當天不是排程星期、或還沒到第一個時間點時回傳 null。
+ * 每日一次的排程用它判斷「今天的執行時間是否已過」，以便較晚啟動或睡眠喚醒後當天補執行。
+ *
+ * @param {Date} now 目前時間
+ * @param {object} schedule createSchedule() 的結果
+ * @returns {Date | null}
+ */
+export function latestRunTimeToday(now, { days, start, end, intervalMinutes, timeZone }) {
+  const today = zonedParts(now, timeZone);
+  if (!days.has(weekdayOf(today))) return null;
+  let latest = null;
+  for (let minutes = start; minutes <= end; minutes += intervalMinutes) {
+    const runAt = zonedTimeToDate(today.year, today.month, today.day, minutes, timeZone);
+    if (runAt > now) break;
+    latest = runAt;
+  }
+  return latest;
+}
+
+/**
+ * 取得某個時間在指定時區的日期「YYYY-MM-DD」，用來判斷「今天」是否已執行過。
+ *
+ * @param {Date} date 時間
+ * @param {string} timeZone 時區名稱
+ * @returns {string}
+ */
+export function dateKeyInZone(date, timeZone) {
+  const { year, month, day } = zonedParts(date, timeZone);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/**
+ * 以指定時區格式化日期，例如「2026-11-18（週三）」，用於訊息標題。
+ *
+ * @param {Date} date 時間
+ * @param {string} timeZone 時區名稱
+ * @returns {string}
+ */
+export function formatDateInZone(date, timeZone) {
+  return `${dateKeyInZone(date, timeZone)}（週${WEEKDAY_NAMES[weekdayOf(zonedParts(date, timeZone))]}）`;
 }
 
 /**

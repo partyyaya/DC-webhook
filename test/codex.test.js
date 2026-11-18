@@ -58,6 +58,15 @@ test('指定 JSON Schema 時以 --output-schema 傳給 Codex', async () => {
   assert.equal(args.at(-1), '-');
 });
 
+test('需要網路搜尋時以 -c web_search="live" 開放，預設不開放', async () => {
+  const reply = await summarizeWithCodex('搜尋新聞', { bin: bins.ok, timeoutMs: 10_000, webSearch: true });
+  const { args } = JSON.parse(reply);
+  assert.equal(args[args.indexOf('-c') + 1], 'web_search="live"');
+  assert.equal(args.at(-1), '-');
+  const plain = JSON.parse(await summarizeWithCodex('整理公告', { bin: bins.ok, timeoutMs: 10_000 }));
+  assert.ok(!plain.args.includes('-c'));
+});
+
 test('找不到 Codex CLI 時立即回報安裝方式', async () => {
   const startedAt = Date.now();
   await assert.rejects(

@@ -79,9 +79,12 @@ async function requestWebhook(webhookUrl, method, messageId, payload, { timeoutM
       continue;
     }
 
-    // 其他錯誤（例如 Webhook 網址錯誤、已被刪除），錯誤訊息不包含網址以免洩漏 Webhook token
+    // 其他錯誤（例如 Webhook 網址錯誤、已被刪除），錯誤訊息不包含網址以免洩漏 Webhook token。
+    // 附上 HTTP 狀態碼，讓呼叫端可區分「訊息已不存在（404）」與其他失敗。
     const code = parseJson(body)?.code;
-    throw new Error(`Discord Webhook ${action}失敗：HTTP ${res.status}${Number.isInteger(code) ? `（Discord 錯誤碼 ${code}）` : ''}`);
+    const error = new Error(`Discord Webhook ${action}失敗：HTTP ${res.status}${Number.isInteger(code) ? `（Discord 錯誤碼 ${code}）` : ''}`);
+    error.status = res.status;
+    throw error;
   }
 }
 

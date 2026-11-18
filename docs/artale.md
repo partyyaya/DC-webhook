@@ -291,7 +291,7 @@ pm2 start npm --name artale --no-autorestart -- run artale:schedule
 
 Artale 設定放在 `env/.env.artale`，共用 Codex 設定放在 `env/.env.shared`。`ARTALE_STATE_FILE` 與 `ARTALE_DISCORD_MESSAGES_FILE` 的相對路徑以專案根目錄為準；手動指令的 `--file` 則以目前執行目錄為準。
 
-Artale 的 Webhook、排程及紀錄設定統一使用 `ARTALE_` 前綴，**不回退讀取舊的全域設定，也不讀取 `STOCKS_`、`CRYPTO_` 的設定**。Codex 執行器、模型及摘要逾時仍為共用設定，與各主題的輪詢時間分開。
+Artale 的 Webhook、排程及紀錄設定統一使用 `ARTALE_` 前綴，**不回退讀取舊的全域設定，也不讀取 `CRYPTO_` 的設定**。Codex 執行器、模型及摘要逾時仍為共用設定，與各主題的輪詢時間分開。
 
 ### 舊環境遷移
 

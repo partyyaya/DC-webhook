@@ -4,7 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { parseWebhookUrl } from './shared/discord.js';
-import { loadProjectEnv, ROOT_DIR } from './shared/env.js';
+import { loadProjectEnv, ROOT_DIR, SOURCES } from './shared/env.js';
 import { listPosts, managePost } from './shared/posts.js';
 
 export const WEBHOOK_HELP = `用法：node src/webhook.js <create|edit|delete|list> [選項]
@@ -18,7 +18,7 @@ export const WEBHOOK_HELP = `用法：node src/webhook.js <create|edit|delete|li
   list                                      查看本機發文紀錄與訊息 ID
 
 共用選項：
-  --source NAME       使用 artale、stocks 或 crypto 的專屬 Webhook 與紀錄設定
+  --source NAME       使用 artale 或 crypto 的專屬 Webhook 與紀錄設定
   --webhook URL       改用指定 Webhook；未選來源時必填
   --thread-id ID      訊息所在的討論串 ID（討論串訊息需提供）
   --history-file PATH 改用指定發文紀錄檔，未指定時使用來源的預設紀錄
@@ -72,14 +72,15 @@ export async function runWebhookCommand(args, { env = process.env, output = cons
     source: { type: 'string' }, 'history-file': { type: 'string' }, 'dry-run': { type: 'boolean' }, help: { type: 'boolean' },
   } });
   if (values.help || positionals.length === 0) {
-    output(boundSource === 'artale'
-      ? WEBHOOK_HELP.replaceAll('node src/webhook.js', 'node src/artale/webhook.js').replaceAll('npm run webhook', 'npm run artale:webhook')
-        + '\n此入口固定讀取 env/.env.artale：ARTALE_DISCORD_WEBHOOK_URL、ARTALE_DISCORD_MESSAGES_FILE。'
+    const boundPrefix = boundSource?.toUpperCase();
+    output(boundSource
+      ? WEBHOOK_HELP.replaceAll('node src/webhook.js', `node src/${boundSource}/webhook.js`).replaceAll('npm run webhook', `npm run ${boundSource}:webhook`)
+        + `\n此入口固定讀取 env/.env.${boundSource}：${boundPrefix}_DISCORD_WEBHOOK_URL、${boundPrefix}_DISCORD_MESSAGES_FILE。`
       : WEBHOOK_HELP);
     return;
   }
   const source = values.source ?? boundSource;
-  if (source !== undefined && !['artale', 'stocks', 'crypto'].includes(source)) throw new Error('--source 請使用 artale、stocks 或 crypto');
+  if (source !== undefined && !SOURCES.includes(source)) throw new Error(`--source 請使用 ${SOURCES.join(' 或 ')}`);
   if (boundSource && source !== boundSource) throw new Error(`此指令固定使用 ${boundSource}，不能切換其他來源`);
   const [action] = positionals;
   if (positionals.length !== 1 || !['create', 'edit', 'delete', 'list'].includes(action)) {

@@ -3,7 +3,8 @@
  *
  * 實際執行的指令相當於：
  *   codex exec --skip-git-repo-check --ephemeral --sandbox read-only --color never \
- *     --output-last-message <暫存檔> [--output-schema <JSON Schema 檔>] [--model <模型>] -
+ *     --output-last-message <暫存檔> [--output-schema <JSON Schema 檔>] [--model <模型>] \
+ *     [-c web_search="live"] -
  * 提示詞從 stdin 傳入（最後的「-」），Codex 的最終回覆會寫到暫存檔再讀回來。
  */
 import { spawn } from 'node:child_process';
@@ -20,9 +21,10 @@ import path from 'node:path';
  * @param {string} [options.model] 指定模型，空字串代表使用 Codex 設定檔的預設模型
  * @param {number} options.timeoutMs 執行逾時時間，超過會強制終止
  * @param {object} [options.schema] JSON Schema；有指定時要求 Codex 回覆符合此格式的 JSON
+ * @param {boolean} [options.webSearch=false] 開放 Codex 使用即時網路搜尋（需要查找最新資訊的來源使用）
  * @returns {Promise<string>} 摘要文字（有指定 schema 時為 JSON 字串）
  */
-export async function summarizeWithCodex(prompt, { bin, model, timeoutMs, schema }) {
+export async function summarizeWithCodex(prompt, { bin, model, timeoutMs, schema, webSearch = false }) {
   // 建立一個空的暫存資料夾作為 Codex 的工作目錄，讓它看不到專案檔案，也用來存放輸出檔
   const workDir = await mkdtemp(path.join(os.tmpdir(), 'dcwebhook-codex-'));
   const outputFile = path.join(workDir, 'summary.md');
@@ -35,6 +37,7 @@ export async function summarizeWithCodex(prompt, { bin, model, timeoutMs, schema
   //   --color never           輸出不含顏色控制碼
   //   --output-last-message   把最終回覆（摘要）寫到指定檔案
   //   --output-schema         要求最終回覆符合指定的 JSON Schema
+  //   -c web_search="live"    開放即時網路搜尋（只有 webSearch 為 true 時加上）
   //   -                       從 stdin 讀取提示詞
   const args = [
     'exec',
@@ -50,6 +53,7 @@ export async function summarizeWithCodex(prompt, { bin, model, timeoutMs, schema
   const schemaFile = schema ? path.join(workDir, 'schema.json') : null;
   if (schemaFile) args.push('--output-schema', schemaFile);
   if (model) args.push('--model', model);
+  if (webSearch) args.push('-c', 'web_search="live"');
   args.push('-');
 
   try {

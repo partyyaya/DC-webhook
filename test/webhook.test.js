@@ -197,12 +197,10 @@ test('Node 入口可單獨使用，不依賴有效排程或 Codex 設定', async
 test('共用指令依來源選擇獨立 Webhook 與紀錄，忽略舊的全域設定', async (t) => {
   const { options, dir, calls } = await setup(t);
   const env = { ...options.env, DISCORD_WEBHOOK_URL: 'invalid', DISCORD_MESSAGES_FILE: 'invalid',
-    STOCKS_DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/444444444444444444/stocksToken',
-    STOCKS_DISCORD_MESSAGES_FILE: path.join(dir, 'stocks.jsonl'),
     CRYPTO_DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/555555555555555555/cryptoToken',
     CRYPTO_DISCORD_MESSAGES_FILE: path.join(dir, 'crypto.jsonl') };
   const run = args => runWebhookCommand(args, { ...options, source: undefined, env });
-  for (const [source, id] of [['artale', '111111111111111111'], ['stocks', '444444444444444444'], ['crypto', '555555555555555555']]) {
+  for (const [source, id] of [['artale', '111111111111111111'], ['crypto', '555555555555555555']]) {
     await run(['create', '--source', source, '--content', '公告']);
     assert.match(calls.at(-1).url.pathname, new RegExp(`/webhooks/${id}/`));
     const records = await run(['list', '--source', source]);
@@ -213,12 +211,13 @@ test('共用指令依來源選擇獨立 Webhook 與紀錄，忽略舊的全域�
   env.CRYPTO_DISCORD_WEBHOOK_URL = '';
   await assert.rejects(run(['create', '--source', 'crypto', '--content', '缺少網址']), /CRYPTO_DISCORD_WEBHOOK_URL/);
   await assert.rejects(run(['create', '--source', 'unknown', '--content', '無效來源']), /--source/);
-  assert.equal(calls.length, 3);
+  await assert.rejects(run(['create', '--source', 'stocks', '--content', '已移除的來源']), /--source/);
+  assert.equal(calls.length, 2);
 });
 
 test('Artale 發文指令不允許切換來源，仍支援明確指定其他 Webhook', async (t) => {
   const { run, calls } = await setup(t);
-  await assert.rejects(run(['delete', '--source', 'stocks', '--message-id', MESSAGE_ID]), /固定使用 artale/);
+  await assert.rejects(run(['delete', '--source', 'crypto', '--message-id', MESSAGE_ID]), /固定使用 artale/);
   assert.equal(calls.length, 0);
   await run(['create', '--webhook', 'https://discord.com/api/webhooks/444444444444444444/anotherToken', '--content', '測試']);
   assert.match(calls[0].url.pathname, /webhooks\/444444444444444444\//);
