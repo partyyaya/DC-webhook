@@ -14,7 +14,7 @@ test('解析優先幣種：順序保留、轉大寫、全名換成代號、重�
   assert.deepEqual(parseCoins('BTC,ADA,ETH'), ['BTC', 'ADA', 'ETH']);
   assert.deepEqual(parseCoins(' eth , Cardano, btc, ETH '), ['ETH', 'ADA', 'BTC']);
   for (const invalid of ['', ' , ', 'BTC;ETH', 'B', 'BTC,比特幣']) {
-    assert.throws(() => parseCoins(invalid), /CRYPTO_PRIORITY_COINS 格式錯誤/);
+    assert.throws(() => parseCoins(invalid), /news.priorityCoins 格式錯誤/);
   }
 });
 

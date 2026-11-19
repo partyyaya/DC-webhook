@@ -1,54 +1,63 @@
 /**
- * Crypto 設定模組：讀取 env/.env.crypto、共用環境檔與系統環境變數。
- * 每日新聞流程從這裡取得設定；手動 Webhook 入口只讀取自己的必要設定。
+ * Crypto 設定模組：讀取主題設定檔 env/crypto.js（範例見 env/crypto.example.js）與共用的 env/.env.shared。
+ * 各欄位的說明與預設值請參考 docs/crypto.md 的「設定參考」章節。
  */
 import path from 'node:path';
 import { MAX_NEWS_COUNT, parseCoins } from './news.js';
-import { createSchedule, parseTime } from '../shared/schedule.js';
-import { loadProjectEnv, positiveIntFromEnv, ROOT_DIR } from '../shared/env.js';
+import { createSchedule } from '../shared/schedule.js';
+import { loadProjectEnv, ROOT_DIR } from '../shared/env.js';
+import { parseWebhookTargets } from '../shared/targets.js';
+import { filePath, integer, listText, loadTopicConfig, section, text } from '../shared/topic-config.js';
 
-loadProjectEnv('crypto');
+loadProjectEnv();
 
-/** 讀取新聞篇數：1～MAX_NEWS_COUNT 的整數（每類新聞發成一則訊息，一則訊息最多 10 張卡片）。 */
-function newsCountFromEnv(name, fallback) {
-  const count = positiveIntFromEnv(name, fallback);
-  if (count > MAX_NEWS_COUNT) throw new Error(`環境變數 ${name} 不能超過 ${MAX_NEWS_COUNT}，目前為「${count}」`);
-  return count;
-}
+const { file: configFile, label, values } = await loadTopicConfig('crypto');
+const settings = section(values, ['webhooks', 'schedule', 'news', 'codexTimeoutMs', 'files'], label);
+const at = (key) => `${label} 的 ${key}`;
+const schedule = section(settings.schedule, ['days', 'time', 'timeZone'], at('schedule'));
+const news = section(settings.news, ['priorityCoins', 'economyCount', 'coinCount'], at('news'));
+const files = section(settings.files, ['state', 'discordMessages'], at('files'));
 
-// 每日發送時間：先用正確的變數名稱驗證格式，錯誤訊息才會指出 CRYPTO_SCHEDULE_TIME
-const scheduleTime = process.env.CRYPTO_SCHEDULE_TIME || '08:00';
-parseTime(scheduleTime, 'CRYPTO_SCHEDULE_TIME');
+const scheduleTime = text(schedule.time, '08:00', at('schedule.time'));
 
-// Crypto 使用的設定值，各欄位的說明與預設值請參考 docs/crypto.md 的「設定參考」章節。
 export const config = {
-  // Discord Webhook 網址（必填，在 run.js / scheduler.js 檢查）
-  discordWebhookUrl: process.env.CRYPTO_DISCORD_WEBHOOK_URL || '',
-  // 每日新聞紀錄：最後完成發送的日期，以及目前在 Discord 上、下次要先刪除的新聞訊息 ID
-  stateFile: path.resolve(ROOT_DIR, process.env.CRYPTO_STATE_FILE || 'data/crypto/state.json'),
+  // 設定檔位置（不存在時為 null，全部使用預設值且沒有 Webhook）
+  configFile,
+  // 要發送的 Webhook 清單（至少一個，在 run.js / scheduler.js 檢查）；以 Webhook ID 區分，name 只用於紀錄輸出。
+  // 名稱與頭像的記錄依 Webhook ID 分開存放，不與其他主題共用
+  targets: parseWebhookTargets(settings.webhooks, at('webhooks')).map((target) => ({
+    ...target,
+    // 每個 Webhook 自己的名稱與頭像變更提醒設定（webhooks[].webhookProfile），加上記錄檔位置
+    webhookProfile: {
+      ...target.webhookProfile,
+      profileFile: path.resolve(ROOT_DIR, `data/crypto/webhook-profiles/${target.webhookId}.json`),
+    },
+  })),
+  // 每日新聞紀錄：每個 Webhook 最後完成發送的日期，以及目前在 Discord 上、下次要先刪除的新聞訊息 ID
+  stateFile: filePath(files.state, 'data/crypto/state.json', at('files.state')),
   // 每則 Discord 訊息的新增、修改、刪除紀錄
-  discordMessagesFile: path.resolve(ROOT_DIR, process.env.CRYPTO_DISCORD_MESSAGES_FILE || 'data/crypto/discord-messages.jsonl'),
+  discordMessagesFile: filePath(files.discordMessages, 'data/crypto/discord-messages.jsonl', at('files.discordMessages')),
   // 新聞篇數與優先幣種：幣種的填寫順序就是搜尋與排列的優先順序
   news: {
-    economyCount: newsCountFromEnv('CRYPTO_ECONOMY_NEWS_COUNT', 3),
-    coinCount: newsCountFromEnv('CRYPTO_COIN_NEWS_COUNT', 3),
-    priorityCoins: parseCoins(process.env.CRYPTO_PRIORITY_COINS || 'BTC,ADA,ETH'),
+    economyCount: integer(news.economyCount, 3, at('news.economyCount'), { max: MAX_NEWS_COUNT }),
+    coinCount: integer(news.coinCount, 3, at('news.coinCount'), { max: MAX_NEWS_COUNT }),
+    priorityCoins: parseCoins(listText(news.priorityCoins, 'BTC,ADA,ETH', at('news.priorityCoins')), at('news.priorityCoins')),
   },
   // 呼叫 Discord 時，每個 HTTP 請求的逾時時間
   httpTimeoutMs: 30_000,
-  // Codex CLI 相關設定：需要即時網路搜尋，搜尋與整理較久，逾時時間與共用摘要分開設定
+  // Codex CLI：執行檔與模型為共用設定（env/.env.shared）；需要網路搜尋，逾時時間在主題設定檔另外設定
   codex: {
     bin: process.env.CODEX_BIN || 'codex',
     model: process.env.CODEX_MODEL || '',
-    timeoutMs: positiveIntFromEnv('CRYPTO_CODEX_TIMEOUT_MS', 10 * 60 * 1000),
+    timeoutMs: integer(settings.codexTimeoutMs, 10 * 60 * 1000, at('codexTimeoutMs')),
     webSearch: true,
   },
   // npm run crypto:schedule 常駐模式的排程：預設每天 08:00 發送一次（台灣時間）
   schedule: createSchedule({
-    days: process.env.CRYPTO_SCHEDULE_DAYS || '1-7',
+    days: listText(schedule.days, '1-7', at('schedule.days')),
     start: scheduleTime,
     end: scheduleTime,
     intervalMinutes: 24 * 60,
-    timeZone: process.env.CRYPTO_SCHEDULE_TIMEZONE || 'Asia/Taipei',
-  }, { envPrefix: 'CRYPTO_' }),
+    timeZone: text(schedule.timeZone, 'Asia/Taipei', at('schedule.timeZone')),
+  }, { names: { days: at('schedule.days'), start: at('schedule.time'), end: at('schedule.time'), timeZone: at('schedule.timeZone') } }),
 };

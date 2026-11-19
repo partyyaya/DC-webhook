@@ -36,11 +36,22 @@ test('公告更新使用不同標籤', () => {
   assert.match(embed.title, /^【公告更新】/);
 });
 
-test('版本更新項目之間恰好空一行，保留更新提示與項目內連結', () => {
-  const summary = '（公告已更新）\r\n- **第一項**：內容\r\n[說明](https://artale.live/tw/guide/example)\r\n- **第二項**：內容\r\n\r\n\r\n- **第三項**：內容';
-  const { description } = buildDiscordPayload(announcement, summary, 'updated').embeds[0];
-  assert.equal(description, '（公告已更新）\n\n- **第一項**：內容\n[說明](https://artale.live/tw/guide/example)\n\n- **第二項**：內容\n\n- **第三項**：內容');
-  assert.equal(buildDiscordPayload(announcement, description, 'updated').embeds[0].description, description);
+test('版本更新項目之間恰好空一行，公告更新時由程式在最前面註明（公告已更新）並保留項目內連結', () => {
+  const summary = '- **第一項**：內容\r\n[說明](https://artale.live/tw/guide/example)\r\n- **第二項**：內容\r\n\r\n\r\n- **第三項**：內容';
+  const items = '- **第一項**：內容\n[說明](https://artale.live/tw/guide/example)\n\n- **第二項**：內容\n\n- **第三項**：內容';
+  const [updated] = buildDiscordMessages(announcement, summary, 'updated', 'update');
+  assert.equal(updated.embeds[0].description, `（公告已更新）\n\n${items}`);
+  // 同一份摘要給新公告時不加註明，只差在標籤與這一行
+  const [fresh] = buildDiscordMessages(announcement, summary, 'new', 'update');
+  assert.equal(fresh.embeds[0].description, items);
+  assert.match(fresh.embeds[0].title, /^【新公告】/);
+  assert.match(updated.embeds[0].title, /^【公告更新】/);
+});
+
+test('維護公告更新時不在內文加入（公告已更新），只有標題標籤不同', () => {
+  const [message] = buildDiscordMessages(announcement, '維護時間：11/18 08:00～12:00', 'updated', 'maintenance');
+  assert.equal(message.embeds[0].description, '維護時間：11/18 08:00～12:00');
+  assert.match(message.embeds[0].title, /^【公告更新】/);
 });
 
 test('過長的摘要會被截斷在 Discord 限制內', () => {

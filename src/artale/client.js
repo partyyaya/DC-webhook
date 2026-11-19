@@ -34,13 +34,13 @@ export const NEWS_CATEGORIES = {
 };
 
 /**
- * 解析 ARTALE_NEWS_CATEGORIES 設定，例如「update,bm」。
+ * 解析設定檔的 newsCategories，例如「update,bm」。
  * 會去除空白、轉小寫、移除重複；出現不認得的分類時拋錯並列出可用的值。
  *
  * @param {string} text 逗號分隔的分類字串
  * @returns {string[]} 分類代碼陣列，例如 ['update', 'bm']
  */
-export function parseCategories(text) {
+export function parseCategories(text, name = 'newsCategories') {
   const categories = [
     ...new Set(
       String(text)
@@ -54,7 +54,7 @@ export function parseCategories(text) {
     const valid = Object.entries(NEWS_CATEGORIES)
       .map(([code, name]) => `${code}（${name}）`)
       .join('、');
-    throw new Error(`ARTALE_NEWS_CATEGORIES 設定錯誤：「${text}」，可用的分類為 ${valid}`);
+    throw new Error(`${name} 設定錯誤：「${text}」，可用的分類為 ${valid}`);
   }
   return categories;
 }

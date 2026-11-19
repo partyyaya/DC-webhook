@@ -27,12 +27,15 @@ async function setup(t, handler) {
     if (options.method === 'DELETE') return new Response(null, { status: 204 });
     return json({ id: MESSAGE_ID, channel_id: '333333333333333333', ...request.payload });
   });
-  const options = {
-    source: 'artale',
-    env: { ARTALE_DISCORD_WEBHOOK_URL: HOOK, ARTALE_DISCORD_MESSAGES_FILE: historyFile },
-    output: (text) => output.push(text),
+  // 在暫存專案目錄寫入主題設定檔 env/<主題>.js；稍等一下再寫，確保修改時間不同而重新載入
+  const writeConfig = async (source, values) => {
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await mkdir(path.join(dir, 'env'), { recursive: true });
+    await writeFile(path.join(dir, 'env', `${source}.js`), `export default ${JSON.stringify(values)};`);
   };
-  return { dir, historyFile, calls, output, options, run: (args) => runWebhookCommand(args, options) };
+  await writeConfig('artale', { webhooks: [{ url: HOOK }], files: { discordMessages: historyFile } });
+  const options = { source: 'artale', rootDir: dir, env: {}, output: (text) => output.push(text) };
+  return { dir, historyFile, calls, output, options, writeConfig, run: (args) => runWebhookCommand(args, options) };
 }
 
 async function seedHistory(file, count) {
@@ -144,8 +147,8 @@ test('切換 Webhook 後只列出該 Webhook 的紀錄，討論串 ID 會傳入�
 });
 
 test('紀錄寫入失敗會明確回報已成功與訊息 ID', async (t) => {
-  const { run, options, dir, calls } = await setup(t);
-  options.env.ARTALE_DISCORD_MESSAGES_FILE = dir; // 目錄可存在，但不能作為紀錄檔 append
+  const { run, dir, calls, writeConfig } = await setup(t);
+  await writeConfig('artale', { webhooks: [{ url: HOOK }], files: { discordMessages: dir } }); // 目錄可存在，但不能作為紀錄檔 append
   await assert.rejects(run(['create', '--content', '公告']), (err) => {
     assert.match(err.message, /已成功/);
     assert.ok(err.message.includes(MESSAGE_ID));
@@ -185,20 +188,25 @@ test('Webhook 及訊息 ID 驗證會在請求前完成，避免刪掉 Webhook �
 });
 
 test('Node 入口可單獨使用，不依賴有效排程或 Codex 設定', async (t) => {
-  const { historyFile } = await setup(t);
+  const { historyFile, dir } = await setup(t);
+  const configFile = path.join(dir, 'artale-config.js');
+  await writeFile(configFile, `export default ${JSON.stringify({
+    webhooks: [{ url: HOOK }], files: { discordMessages: historyFile },
+    schedule: { days: 'invalid' }, newsCategories: ['invalid'],
+  })};`);
   const { stdout } = await execute(process.execPath, ['src/artale/webhook.js', 'create', '--content', '預覽', '--dry-run'], {
-    env: { ...process.env, ARTALE_DISCORD_WEBHOOK_URL: HOOK, ARTALE_DISCORD_MESSAGES_FILE: historyFile,
-      ARTALE_SCHEDULE_DAYS: 'invalid', ARTALE_NEWS_CATEGORIES: 'invalid', CODEX_BIN: '/missing-codex' },
+    env: { ...process.env, ARTALE_CONFIG_FILE: configFile, CODEX_BIN: '/missing-codex' },
   });
   assert.equal(JSON.parse(stdout).action, 'create');
   assert.ok(!stdout.includes('testSecretToken'));
 });
 
-test('共用指令依來源選擇獨立 Webhook 與紀錄，忽略舊的全域設定', async (t) => {
-  const { options, dir, calls } = await setup(t);
-  const env = { ...options.env, DISCORD_WEBHOOK_URL: 'invalid', DISCORD_MESSAGES_FILE: 'invalid',
-    CRYPTO_DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/555555555555555555/cryptoToken',
-    CRYPTO_DISCORD_MESSAGES_FILE: path.join(dir, 'crypto.jsonl') };
+test('共用指令依來源選擇各自設定檔的 Webhook 與紀錄，不讀取環境變數', async (t) => {
+  const { options, dir, calls, writeConfig } = await setup(t);
+  const cryptoConfig = { webhooks: [{ url: 'https://discord.com/api/webhooks/555555555555555555/cryptoToken' }],
+    files: { discordMessages: path.join(dir, 'crypto.jsonl') } };
+  await writeConfig('crypto', cryptoConfig);
+  const env = { CRYPTO_DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/999999999999999999/envToken' };
   const run = args => runWebhookCommand(args, { ...options, source: undefined, env });
   for (const [source, id] of [['artale', '111111111111111111'], ['crypto', '555555555555555555']]) {
     await run(['create', '--source', source, '--content', '公告']);
@@ -208,8 +216,8 @@ test('共用指令依來源選擇獨立 Webhook 與紀錄，忽略舊的全域�
     assert.equal(records[0].webhookId, id);
   }
   await assert.rejects(run(['create', '--content', '沒有指定來源']), /--source/);
-  env.CRYPTO_DISCORD_WEBHOOK_URL = '';
-  await assert.rejects(run(['create', '--source', 'crypto', '--content', '缺少網址']), /CRYPTO_DISCORD_WEBHOOK_URL/);
+  await writeConfig('crypto', { ...cryptoConfig, webhooks: [] });
+  await assert.rejects(run(['create', '--source', 'crypto', '--content', '缺少網址']), /env\/crypto\.js 的 webhooks/);
   await assert.rejects(run(['create', '--source', 'unknown', '--content', '無效來源']), /--source/);
   await assert.rejects(run(['create', '--source', 'stocks', '--content', '已移除的來源']), /--source/);
   assert.equal(calls.length, 2);
@@ -285,4 +293,27 @@ test('發文紀錄格式錯誤時不覆寫原檔，並釋放寫入鎖', async (t
   await assert.rejects(run(['create', '--content', '新公告']), /已成功.*紀錄寫入失敗/);
   assert.equal(await readFile(historyFile, 'utf8'), '{broken}\n');
   await assert.rejects(access(`${historyFile}.lock`), { code: 'ENOENT' });
+});
+
+test('設定檔有多個 Webhook 時，新增／修改／刪除需用 --webhook-id 指定；list 列出全部', async (t) => {
+  const { options, dir, calls, writeConfig } = await setup(t);
+  await writeConfig('crypto', {
+    webhooks: [
+      { name: '自己', url: 'https://discord.com/api/webhooks/555555555555555555/aToken' },
+      { name: '朋友', url: 'https://discord.com/api/webhooks/666666666666666666/bToken' },
+    ],
+    files: { discordMessages: path.join(dir, 'crypto.jsonl') },
+  });
+  const run = args => runWebhookCommand(args, { ...options, source: 'crypto' });
+  await assert.rejects(run(['create', '--content', '公告']), /設定了 2 個 Webhook，請用 --webhook-id 指定（555555555555555555、666666666666666666）/);
+  await run(['create', '--webhook-id', '666666666666666666', '--content', '公告']);
+  assert.match(calls.at(-1).url.pathname, /webhooks\/666666666666666666\/bToken/);
+  await run(['create', '--webhook-id', '555555555555555555', '--content', '公告']);
+  assert.equal((await run(['list'])).length, 2);
+  assert.equal((await run(['list', '--webhook-id', '666666666666666666'])).length, 1);
+  await assert.rejects(run(['create', '--webhook-id', '777', '--content', '公告']), /沒有 ID 777/);
+  await assert.rejects(run(['create', '--webhook-id', '555555555555555555', '--webhook', HOOK, '--content', '公告']), /擇一/);
+  await assert.rejects(runWebhookCommand(['create', '--webhook-id', '555', '--webhook', HOOK, '--content', 'x'], { ...options, source: undefined }), /擇一/);
+  await assert.rejects(runWebhookCommand(['create', '--webhook-id', '555', '--content', 'x'], { ...options, source: undefined }), /需搭配 --source/);
+  assert.equal(calls.length, 2);
 });

@@ -2,9 +2,11 @@
  * 版本紀錄模組：負責計算公告內容的雜湊值、比對是否有變化，
  * 以及讀寫已發送紀錄檔（預設 data/artale/state.json），用來避免重複通知。
  *
- * 紀錄檔格式：
- *   { "notified": [ { id, hash, title, publishedAt, url, notifiedAt }, ... ] }
- * 最新發送的版本排在最前面。
+ * 紀錄檔格式（依 Webhook ID 分開記錄，某個 Webhook 發送失敗時只補發給它）：
+ *   { "targets": { "<Webhook ID>": { "notified": [ { id, hash, title, publishedAt, url, notifiedAt }, ... ] } } }
+ * 每個 Webhook 最新發送的版本排在最前面。
+ *
+ * 舊版只支援單一 Webhook 的格式 { "notified": [...] } 會以 legacy 欄位回傳，由 run.js 轉成新格式。
  */
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -24,35 +26,53 @@ export function hashAnnouncement({ title, content }) {
   return createHash('sha256').update(`${title}\n\n${content}`).digest('hex');
 }
 
+const notifiedOf = (entry) => ({ notified: Array.isArray(entry?.notified) ? entry.notified : [] });
+
 /**
  * 讀取已發送紀錄檔。
  * 檔案不存在（第一次執行）時回傳空紀錄；檔案損壞時直接拋錯，
  * 避免把損壞當成「沒有紀錄」而重複發送。
  *
  * @param {string} file 紀錄檔路徑
- * @returns {Promise<{notified: object[]}>}
+ * @returns {Promise<{targets: Record<string, {notified: object[]}>, legacy?: {notified: object[]}}>}
  */
 export async function loadState(file) {
+  let state;
   try {
-    const state = JSON.parse(await readFile(file, 'utf8'));
-    return { notified: Array.isArray(state.notified) ? state.notified : [] };
+    state = JSON.parse(await readFile(file, 'utf8'));
   } catch (err) {
-    if (err.code === 'ENOENT') return { notified: [] };
+    if (err.code === 'ENOENT') return { targets: {} };
     throw new Error(`讀取狀態檔 ${file} 失敗：${err.message}`);
   }
+  const targets = {};
+  for (const [webhookId, entry] of Object.entries(state?.targets ?? {})) {
+    if (/^\d+$/.test(webhookId)) targets[webhookId] = notifiedOf(entry);
+  }
+  const isLegacy = state && !state.targets && Array.isArray(state.notified);
+  return isLegacy ? { targets, legacy: notifiedOf(state) } : { targets };
+}
+
+/** 取得指定 Webhook 的紀錄；沒有紀錄時回傳空紀錄。 */
+export function targetState(state, webhookId) {
+  return state.targets[webhookId] ?? { notified: [] };
+}
+
+/** 回傳更新指定 Webhook 紀錄後的新物件，不修改傳入的 state。 */
+export function withTargetState(state, webhookId, entry) {
+  return { ...state, targets: { ...state.targets, [webhookId]: entry } };
 }
 
 /**
- * 寫入已發送紀錄檔。
+ * 寫入已發送紀錄檔（只寫入新格式）。
  * 先寫到暫存檔再改名覆蓋，確保寫到一半中斷時不會留下損壞的紀錄檔。
  *
  * @param {string} file 紀錄檔路徑（資料夾不存在會自動建立）
- * @param {{notified: object[]}} state 要寫入的紀錄
+ * @param {{targets: object}} state 要寫入的紀錄
  */
 export async function saveState(file, state) {
   await mkdir(path.dirname(file), { recursive: true });
   const tmpFile = `${file}.${process.pid}.tmp`;
-  await writeFile(tmpFile, `${JSON.stringify(state, null, 2)}\n`);
+  await writeFile(tmpFile, `${JSON.stringify({ targets: state.targets }, null, 2)}\n`);
   await rename(tmpFile, file);
 }
 

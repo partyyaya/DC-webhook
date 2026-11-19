@@ -10,6 +10,7 @@
 - [共用設定](#共用設定)
 - [共用 Webhook 工具](#共用-webhook-工具)
 - [訊息操作紀錄](#訊息操作紀錄)
+- [Webhook 名稱與頭像變更提醒](#webhook-名稱與頭像變更提醒)
 - [問題排查](#問題排查)
 - [測試與開發](#測試與開發)
 - [專案結構](#專案結構)
@@ -30,23 +31,35 @@ codex login
 
 `nvm use` 依 [.nvmrc](.nvmrc) 切換至 Node 22。Codex 可使用 ChatGPT 帳號登入，也可透過 API key 驗證，見[共用設定](#共用設定)。
 
-### 環境變數與 Discord Webhook
+### 設定檔與 Discord Webhook
 
-環境檔集中放在 `env/`，正式設定與範例檔分開。共用 Codex 設定可先複製：
+設定檔集中放在 `env/`，正式設定與範例檔分開：
+
+| 檔案 | 內容 |
+| --- | --- |
+| `env/.env.shared` | 所有主題共用的 Codex 設定（執行檔、模型、API key、摘要逾時），環境變數格式 |
+| `env/artale.js`、`env/crypto.js` | 各主題的**所有設定**：Webhook、排程、內容、名稱與頭像變更提醒、紀錄位置。JS 檔，可以直接寫註解 |
+
+共用 Codex 設定可先複製範例 [env/.env.shared.example](env/.env.shared.example)；若沿用 Codex 預設值及 CLI 登入資訊，可省略正式共用檔：
 
 ```bash
 cp env/.env.shared.example env/.env.shared
 ```
 
-共用範例見 [env/.env.shared.example](env/.env.shared.example)。若沿用 Codex 預設值及 CLI 登入資訊，可省略正式共用檔。各主題另外複製 `env/.env.<來源>.example` 為 `env/.env.<來源>`，操作方式見主題文件。
+各主題複製自己的範例檔，再依主題文件填寫：
 
-程式只載入 `env/.env.shared` 與本次指定來源的環境檔，不讀取根目錄舊 `.env`、其他來源或 `.example`。系統環境變數優先，包含已設定的空值。共用檔不提供主題前綴設定，來源檔只接受自身前綴；Codex 設定請放在共用檔。
+```bash
+cp env/artale.example.js env/artale.js
+cp env/crypto.example.js env/crypto.js
+```
 
-正式環境檔已列入 `.gitignore`，只有 `.example` 範例納入版本控制。
+主題設定檔以 `export default` 匯出設定物件；除了 `webhooks` 以外都是選填，欄位名稱寫錯或型別不符時，程式會指出檔案與欄位並停止。共用檔只讀取 Codex 等共用設定，系統環境變數優先，包含已設定的空值；系統環境變數不會覆寫主題設定。程式不讀取根目錄舊 `.env`；舊版的 `env/.env.artale`、`env/.env.crypto` 已停用，仍存在時會提醒搬到新的設定檔。
 
-在 Discord 開啟 **頻道設定 → 整合 → Webhook → 新 Webhook**，複製網址，再填入對應主題的設定。Webhook 名稱與頭像也在 Discord 設定。
+正式設定檔已列入 `.gitignore`，只有範例檔納入版本控制。
 
-各主題使用自己的 Webhook、排程與去重紀錄設定。具體變數、預設值及啟動指令請查看該主題文件；共用設定不決定任何主題的輪詢時間。修改設定後，需重新啟動對應的常駐程式。
+在 Discord 開啟 **頻道設定 → 整合 → Webhook → 新 Webhook**，複製網址，再填入對應主題設定檔的 `webhooks`。每個主題都可以列出多個 Webhook，同樣的內容會發送到每一個，各自記錄。Webhook 名稱與頭像也在 Discord 設定。
+
+各主題使用自己的 Webhook、排程與去重紀錄設定。具體欄位、預設值及啟動指令請查看該主題文件；共用設定不決定任何主題的輪詢時間。修改設定後，需重新啟動對應的常駐程式。
 
 不同主題的常駐排程是各自獨立的程式，可以在不同終端機同時執行，例如 `npm run artale:schedule` 與 `npm run crypto:schedule`。同一個主題的排程不要同時開兩份，否則會重複發送。
 
@@ -77,12 +90,13 @@ npm run webhook -- --help
 
 ### 選擇設定來源
 
-`--source` 依來源名稱讀取 `env/.env.<來源>` 中的專屬 Webhook 與發文紀錄設定。例如選擇 `crypto`，就從 `env/.env.crypto` 讀取 `CRYPTO_DISCORD_WEBHOOK_URL` 與 `CRYPTO_DISCORD_MESSAGES_FILE`，不回退至其他來源或舊的全域設定。
+`--source` 依來源名稱讀取該主題設定檔中的 Webhook 與發文紀錄設定。例如選擇 `crypto`，就從 `env/crypto.js` 讀取 `webhooks` 與 `files.discordMessages`，不檢查排程等其他設定，也不讀取其他來源的設定。設定了多個 Webhook 時，新增、修改、刪除需加上 `--webhook-id` 指定。
 
 | 選項 | 用途 |
 | --- | --- |
 | `--source NAME` | 使用指定來源的專屬設定 |
 | `--webhook URL` | 明確指定 Webhook，優先於來源設定 |
+| `--webhook-id ID` | 來源設定了多個 Webhook 時（例如 [Crypto 的 Webhook 清單](docs/crypto.md#多個-webhook)），指定要使用的 Webhook ID |
 | `--history-file PATH` | 明確指定發文紀錄檔，優先於來源設定 |
 | `--thread-id ID` | 指定訊息所在的討論串；也可放在 Webhook URL 的 `thread_id` 參數 |
 | `--dry-run` | 新增、修改、刪除只預覽，不連線、不寫紀錄 |
@@ -137,6 +151,17 @@ npm run webhook -- edit --source crypto --message-id 123456789012345678 --file e
 
 如果批次發送中途失敗，已成功訊息的 ID 仍會保存。Discord 已成功但紀錄寫入失敗時，程式會明確回報操作及訊息 ID；請保留 ID 並修正紀錄路徑或權限，避免直接重試新增造成重複訊息。各主題的公告去重機制另見專屬文件。
 
+## Webhook 名稱與頭像變更提醒
+
+Webhook 的名稱與頭像可以被伺服器管理員在 Discord 頻道設定中更換，Discord 不會通知 Webhook。共用模組 `src/shared/webhook-profile.js` 會在各主題每次正式執行時查詢目前的名稱與頭像，和該主題上次的記錄比較；被更換時依主題設定發送提醒：
+
+- 每個 Webhook（機器人）的定位不同，提醒設定寫在主題設定檔 `webhooks` 中各 Webhook 的 `webhookProfile`。
+- 有角色設定提示詞（`personaPrompt`）時，由 Codex 看新頭像圖片與新名稱，以角色口吻寫感想。
+- 沒有提示詞時，直接發送固定文字（`avatarMessage`、`nameMessage`）。
+- 三者都是空的（預設）時不發送。兩者同時被更換時發送兩行：第一行頭像、第二行名稱。
+
+各主題、各 Webhook 的記錄分開，詳細規則見 [Artale](docs/artale.md#webhook-名稱與頭像變更提醒)、[Crypto](docs/crypto.md#webhook-名稱與頭像變更提醒) 文件。
+
 ## 問題排查
 
 | 現象 | 處理方式 |
@@ -144,7 +169,7 @@ npm run webhook -- edit --source crypto --message-id 123456789012345678 --file e
 | 找不到 Codex CLI | 安裝並登入；PATH 找不到時，設定 `CODEX_BIN` 絕對路徑 |
 | Codex CLI 執行失敗 | 查看錯誤輸出，確認登入、額度與逾時設定 |
 | `bad CPU type in executable` | 執行 `nvm use`，確認 Node 架構適合目前電腦；可用 `nvm alias default 22` 設定預設版本 |
-| 找不到 Webhook 設定 | 確認選擇的來源、專屬環境變數或 `--webhook` 參數 |
+| 找不到 Webhook 設定 | 確認選擇的來源、主題設定檔 `env/<主題>.js` 的 `webhooks`，或 `--webhook` 參數 |
 | 修改／刪除回傳 HTTP 404 | 確認訊息 ID 與原 Webhook；訊息或 Webhook 可能已刪除 |
 | Discord 操作成功但紀錄寫入失敗 | 保留錯誤內的訊息 ID，檢查紀錄檔路徑與權限，勿直接重試新增 |
 | 紀錄檔留下 `.lock` | 確認沒有其他程序正在寫入，再移除強制中止程序留下的鎖檔 |
@@ -167,8 +192,11 @@ npm test
 | 排程設定與時間計算 | `src/shared/schedule.js` |
 | 分來源環境檔載入與專案路徑 | `src/shared/env.js` |
 | 紀錄輸出 | `src/shared/log.js` |
+| Webhook 名稱與頭像變更提醒 | `src/shared/webhook-profile.js` |
+| 主題設定檔載入與欄位檢查 | `src/shared/topic-config.js` |
+| Webhook 清單檢查 | `src/shared/targets.js` |
 
-新增主題時，建立專屬模組、指令、設定前綴與說明文件，並將來源名稱加入 `src/shared/env.js` 的 `SOURCES`；各主題分開執行。
+新增主題時，建立專屬模組、指令、設定檔範例（`env/<主題>.example.js`）與說明文件，並將來源名稱加入 `src/shared/env.js` 的 `SOURCES`；各主題分開執行。主題設定檔的載入與欄位檢查工具在 `src/shared/topic-config.js`。
 
 ## 專案結構
 
@@ -179,7 +207,8 @@ npm test
 ├── env/
 │   ├── .env.shared.example # 共用 Codex 設定範本
 │   ├── .env.shared     # 正式共用設定，不納入版本控制
-│   └── .env.<來源>*    # 各主題正式設定與 .example 範本
+│   ├── <主題>.example.js # 各主題設定檔範例
+│   └── <主題>.js       # 各主題正式設定檔（Webhook、排程、內容、提醒），不納入版本控制
 ├── .nvmrc              # Node 版本
 ├── package.json        # 執行指令
 ├── examples/           # 手動發文 JSON 範本

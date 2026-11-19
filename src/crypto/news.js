@@ -2,9 +2,9 @@
  * Crypto 新聞規則：組出給 Codex 的搜尋提示詞與輸出 JSON Schema，並檢查、整理 Codex 的回覆。
  *
  * 每天請 Codex 以即時網路搜尋，找出發送前 24 小時內的：
- *   - economy：美國經濟新聞，最重要的 N 則（CRYPTO_ECONOMY_NEWS_COUNT，預設 3）
- *   - crypto：虛擬貨幣新聞，最多 N 則（CRYPTO_COIN_NEWS_COUNT，預設 3）；
- *     CRYPTO_PRIORITY_COINS 的每個幣種至少 1 則（預設 BTC → ADA → ETH），選該幣種最重要的新聞；
+ *   - economy：美國經濟新聞，最重要的 N 則（設定檔 news.economyCount，預設 3）
+ *   - crypto：虛擬貨幣新聞，最多 N 則（設定檔 news.coinCount，預設 3）；
+ *     news.priorityCoins 的每個幣種至少 1 則（預設 BTC → ADA → ETH），選該幣種最重要的新聞；
  *     篇數少於幣種數量時依幣種順序只取前幾個；還有剩餘名額時只放重要新聞，不足寧缺勿濫
  * 篇數與優先幣種由 config.js 讀取後傳入；想調整撰寫規則，修改 buildNewsPrompt() 即可。
  */
@@ -34,13 +34,13 @@ function toCoinCode(value) {
 }
 
 /**
- * 解析 CRYPTO_PRIORITY_COINS，例如「BTC,ADA,ETH」；順序即為優先順序，重複的幣種只保留第一次。
+ * 解析設定檔的 news.priorityCoins，例如「BTC,ADA,ETH」；順序即為優先順序，重複的幣種只保留第一次。
  *
  * @param {string} text 原始字串
  * @param {string} [name] 錯誤訊息使用的環境變數名稱
  * @returns {string[]} 大寫幣種代號
  */
-export function parseCoins(text, name = 'CRYPTO_PRIORITY_COINS') {
+export function parseCoins(text, name = 'news.priorityCoins') {
   const coins = String(text).split(',').map((part) => part.trim()).filter(Boolean).map(toCoinCode);
   if (coins.length === 0 || coins.some((coin) => !/^[A-Z0-9]{2,10}$/.test(coin))) {
     throw new Error(`${name} 格式錯誤：「${text}」，請使用逗號分隔的幣種代號，例如 BTC,ADA,ETH`);

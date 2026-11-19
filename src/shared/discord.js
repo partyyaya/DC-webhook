@@ -1,4 +1,4 @@
-/** 共用 Discord Webhook API：新增、修改、刪除、網址驗證與限流重試。 */
+/** 共用 Discord Webhook API：查詢、新增、修改、刪除、網址驗證與限流重試。 */
 const NO_MENTIONS = { parse: [] };
 
 /**
@@ -26,6 +26,17 @@ export async function deleteDiscordMessage(webhookUrl, messageId, options = {}) 
   return requestWebhook(webhookUrl, 'DELETE', messageId, undefined, options);
 }
 
+/**
+ * 查詢 Webhook 目前的設定（在 Discord 頻道設定中可修改的名稱與頭像）。
+ * 只回傳需要的欄位，不回傳 Discord 回應中的 token。
+ *
+ * @returns {Promise<{id: string, name: string, avatar: string | null}>} avatar 為頭像代碼，換頭像時會改變
+ */
+export async function getWebhookProfile(webhookUrl, options = {}) {
+  const webhook = await requestWebhook(webhookUrl, 'GET', undefined, undefined, options);
+  return { id: String(webhook?.id ?? ''), name: webhook?.name ?? '', avatar: webhook?.avatar ?? null };
+}
+
 /** 驗證 Webhook 路徑，避免將訊息刪除誤送成刪除 Webhook 本身；錯誤不包含 token。 */
 export function parseWebhookUrl(value) {
   let url;
@@ -43,8 +54,11 @@ export function parseWebhookUrl(value) {
 
 async function requestWebhook(webhookUrl, method, messageId, payload, { timeoutMs = 30_000, maxAttempts = 3 } = {}) {
   const url = parseWebhookUrl(webhookUrl);
-  const action = { POST: '新增', PATCH: '修改', DELETE: '刪除' }[method];
-  if (method === 'POST') {
+  const action = { GET: '查詢', POST: '新增', PATCH: '修改', DELETE: '刪除' }[method];
+  if (method === 'GET') {
+    // 查詢 Webhook 本身，不需要 wait、thread_id 等訊息參數
+    url.search = '';
+  } else if (method === 'POST') {
     // 等 Discord 建立訊息後取得 message ID。
     url.searchParams.set('wait', 'true');
   } else {

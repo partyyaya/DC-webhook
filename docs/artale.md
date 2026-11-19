@@ -15,6 +15,8 @@
 - [管理 Discord 發文](#管理-discord-發文)
 - [刪除後重新發布](#刪除後重新發布)
 - [自動排程](#自動排程)
+- [Webhook 名稱與頭像變更提醒](#webhook-名稱與頭像變更提醒)
+- [多個 Webhook](#多個-webhook)
 - [設定參考](#設定參考)
 - [舊環境遷移](#舊環境遷移)
 - [問題排查](#問題排查)
@@ -24,16 +26,20 @@
 
 先完成根目錄 README 的[環境設置](../README.md#環境設置)，以下指令皆在專案根目錄執行。
 
-若尚無 Artale 正式設定檔，先複製範例：
+Artale 的所有設定（Webhook、分類、排程、提醒、紀錄位置）集中在一份 JS 設定檔 `env/artale.js`，可以直接寫註解。若尚無正式設定檔，先複製範例：
 
 ```bash
-cp env/.env.artale.example env/.env.artale
+cp env/artale.example.js env/artale.js
 ```
 
-在 `env/.env.artale` 填入 Artale 頻道的 Webhook，範例見 [env/.env.artale.example](../env/.env.artale.example)：
+在 `webhooks` 填入 Artale 頻道的 Webhook，其他欄位說明見範例檔 [env/artale.example.js](../env/artale.example.js) 與[設定參考](#設定參考)：
 
-```ini
-ARTALE_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/xxxxxxxx/yyyyyyyy
+```js
+export default {
+  webhooks: [
+    { name: '自己的伺服器', url: 'https://discord.com/api/webhooks/xxxxxxxx/yyyyyyyy' },
+  ],
+};
 ```
 
 依分類篇數上限預覽第一頁的已發布公告，不發送 Discord，也不更新通知或發文紀錄：
@@ -70,7 +76,7 @@ npm run artale:schedule
 | `npm run artale:preview` | 同啟動檢查，只預覽、不發送或寫紀錄 |
 | `npm run artale:schedule` 啟動當下 | 立即依上述篇數比對第一頁，即使不在設定的星期或時段內 |
 | 排程後續每輪 | 上述最新幾篇中，發布時間落在「執行當下往前 N 分鐘」的公告 |
-| 單次或預覽加上 `--window` | 模擬後續排程的區間檢查，N 取自 `ARTALE_CHECK_INTERVAL_MINUTES` |
+| 單次或預覽加上 `--window` | 模擬後續排程的區間檢查，N 取自設定檔的 `schedule.intervalMinutes` |
 
 例如設定為 `60`，排程於當天 **09:20** 執行，就比對第一頁內 **08:20～09:20** 的公告；若最新三篇版本更新公告都在區間內，三篇都會比對；若有四篇，最多只比對較新的三篇。改成 `30` 分鐘，範圍就是 **08:50～09:20**。啟動檢查不套用回溯區間，但仍遵守各分類最新一篇／三篇的限制。
 
@@ -161,7 +167,7 @@ npm run artale:schedule
 | 預覽後續排程的區間檢查 | `npm run artale:preview -- --window --force` | 否 |
 | 管理 Artale 訊息 | `npm run artale:webhook -- <操作> ...` | 依操作而定 |
 
-Artale 使用獨立指令與 `ARTALE_` 設定。舊的 `npm start`、`npm run dry-run`、`npm run schedule` 已移除，請使用上表指令及 `npm run artale:schedule`。
+Artale 使用獨立指令與設定檔 `env/artale.js`。舊的 `npm start`、`npm run dry-run`、`npm run schedule` 已移除，請使用上表指令及 `npm run artale:schedule`。
 
 ### 強制重新發布的範圍
 
@@ -179,20 +185,20 @@ Artale 使用獨立指令與 `ARTALE_` 設定。舊的 `npm start`、`npm run dr
 
 ### 只處理單一分類
 
-只預覽單一分類（以下適用於 macOS／Linux）：
+加上 `--category` 時，這次只處理指定分類（逗號分隔），不修改設定檔；Windows 與 macOS 用法相同：
 
 ```bash
 # 購物商場
-ARTALE_NEWS_CATEGORIES=bm npm run artale:preview -- --force
+npm run artale:preview -- --force --category bm
 
 # 版本更新
-ARTALE_NEWS_CATEGORIES=update npm run artale:preview -- --force
+npm run artale:preview -- --force --category update
 
 # 維護
-ARTALE_NEWS_CATEGORIES=maintenance npm run artale:preview -- --force
+npm run artale:preview -- --force --category maintenance
 ```
 
-預覽不需要 `ARTALE_DISCORD_WEBHOOK_URL`。確認後，將同一指令中的 `npm run artale:preview` 改為 `npm run artale`，就會實際發送到設定的頻道。
+預覽不需要設定 Webhook。確認後，將同一指令中的 `npm run artale:preview` 改為 `npm run artale`，就會實際發送到設定的每個 Webhook。
 
 <details>
 <summary>尚未安裝 Codex，或預覽時摘要失敗</summary>
@@ -211,7 +217,7 @@ ARTALE_NEWS_CATEGORIES=maintenance npm run artale:preview -- --force
 
 ## 管理 Discord 發文
 
-Artale 專用入口固定使用 `ARTALE_DISCORD_WEBHOOK_URL` 與 `ARTALE_DISCORD_MESSAGES_FILE`，不載入公告、排程或 Codex 設定。也可直接執行 `node src/artale/webhook.js <操作> ...`。
+Artale 專用入口固定使用 `env/artale.js` 的 `webhooks` 與 `files.discordMessages`，不檢查公告、排程或 Codex 設定。也可直接執行 `node src/artale/webhook.js <操作> ...`。設定了多個 Webhook 時，新增、修改、刪除需加上 `--webhook-id <ID>` 指定（ID 可從 `list` 的 `webhookId` 查到）。
 
 ```bash
 # 新增訊息；加 --dry-run 可先預覽
@@ -231,13 +237,13 @@ npm run artale:webhook -- delete --message-id 123456789012345678
 
 以下流程適用於第一頁且在各分類篇數上限內的公告。先確認預覽含有目標公告與新內容，再刪除舊文並重發。`--force` 仍遵守維護一篇、更新三篇、商城一篇的限制；若只想替換特定單篇，或公告已不在上述範圍，請準備固定內容 JSON，使用 `artale:webhook` 的 `create --file` 預覽及發送。
 
-**刪除 DC 訊息不會清除 `data/artale/state.json` 的公告去重紀錄。**即使 DC 公告已全部刪除，直接執行 `npm run artale` 仍會略過已通知且未變更的版本；需要重新發布時使用 `npm run artale -- --force`，仍遵守最新一篇／三篇與維護判斷規則。若自訂 `ARTALE_STATE_FILE`，去重紀錄以該設定路徑為準。
+**刪除 DC 訊息不會清除 `data/artale/state.json` 的公告去重紀錄。**即使 DC 公告已全部刪除，直接執行 `npm run artale` 仍會略過已通知且未變更的版本；需要重新發布時使用 `npm run artale -- --force`，仍遵守最新一篇／三篇與維護判斷規則。`--force` 會重新發送到設定的每個 Webhook。若自訂 `files.state`，去重紀錄以該設定路徑為準。
 
 以下只處理商城；要處理版本更新，將 `bm` 改為 `update`：
 
 ```bash
 # 1. 先確認第一頁的目標公告與新排版
-ARTALE_NEWS_CATEGORIES=bm npm run artale:preview -- --force
+npm run artale:preview -- --force --category bm
 
 # 2. 查詢目前 Webhook 的訊息 ID，選擇要替換的 active 紀錄
 node src/artale/webhook.js list
@@ -246,38 +252,40 @@ node src/artale/webhook.js list
 node src/artale/webhook.js delete --message-id 123456789012345678
 
 # 4. 重新產生摘要並發布商城公告
-ARTALE_NEWS_CATEGORIES=bm npm run artale -- --force
+npm run artale -- --force --category bm
 ```
 
 商城若拆成多則，需逐則刪除該篇公告的舊訊息。若摘要成功但商城預覽為空，請先確認這是預期結果；正式執行時若仍沒有需通知內容，就不會發送。若需保持摘要文字完全相同，請先準備固定內容的 JSON 檔，並用 `create --file` 預覽及發送；`npm run artale -- --force` 會重新產生摘要，並不直接沿用預覽結果。
 
 ### Webhook 與訊息紀錄
 
-Artale 發文紀錄預設為 `data/artale/discord-messages.jsonl`，可用 `ARTALE_DISCORD_MESSAGES_FILE` 調整。每份紀錄檔保留最近 100 筆新增、修改、刪除操作；排程發送的訊息也會立即記錄 ID，供查詢或撤回。
+Artale 發文紀錄預設為 `data/artale/discord-messages.jsonl`，可用設定檔的 `files.discordMessages` 調整；所有 Webhook 共用這份紀錄，每筆都記有 Webhook ID。每份紀錄檔保留最近 100 筆新增、修改、刪除操作；排程發送的訊息也會立即記錄 ID，供查詢或撤回。
 
-`list` 只讀本機紀錄；有設定 Webhook 時只列出該 Webhook，未設定時列出檔案中的全部紀錄。`active`／`deleted` 狀態、保留上限與紀錄寫入失敗的處理，見[共用訊息操作紀錄](../README.md#訊息操作紀錄)。
+`list` 只讀本機紀錄；只設定一個 Webhook 時只列出該 Webhook，有多個時列出全部（可加 `--webhook-id` 篩選）。`active`／`deleted` 狀態、保留上限與紀錄寫入失敗的處理，見[共用訊息操作紀錄](../README.md#訊息操作紀錄)。
 
 修改與刪除必須使用原本的 Webhook。Artale 專用入口不能透過 `--source` 切換主題；若要使用另一個群組的 Webhook，可明確指定 `--webhook URL`。
 
 ## 自動排程
 
-修改 `env/.env.artale`、`env/.env.shared` 或程式後，需重新啟動常駐程式才會載入新設定與排版；已發布的訊息不會自動修改。排程可在 `env/.env.artale` 設定：
+修改 `env/artale.js`、`env/.env.shared` 或程式後，需重新啟動常駐程式才會載入新設定與排版；已發布的訊息不會自動修改。排程在 `env/artale.js` 的 `schedule` 設定：
 
-```ini
-ARTALE_SCHEDULE_DAYS=2              # 1=週一，7=週日；支援 2,4、1-5 等寫法
-ARTALE_SCHEDULE_START=08:20         # 開始時間
-ARTALE_SCHEDULE_END=17:20           # 結束時間
-ARTALE_CHECK_INTERVAL_MINUTES=60    # 後續排程間隔與回溯分鐘數，不限制啟動檢查
-ARTALE_SCHEDULE_TIMEZONE=Asia/Taipei
+```js
+schedule: {
+  days: '2',              // 1=週一，7=週日；支援 '2,4'、'1-5' 等寫法
+  start: '08:20',         // 開始時間
+  end: '17:20',           // 結束時間
+  intervalMinutes: 60,    // 後續排程間隔與回溯分鐘數，不限制啟動檢查
+  timeZone: 'Asia/Taipei',
+},
 ```
 
 啟動時先依各分類篇數上限檢查一次第一頁，不受星期與時段限制；後續預設固定時間點為 08:20、09:20、…、17:20，共 10 次。時間點從開始時間起算，超過結束時間就停止；間隔無法整除時，最後一次會早於結束時間。目前不支援跨午夜時段，開始時間必須早於或等於結束時間。
 
 | 需求 | 設定範例 |
 | --- | --- |
-| 每週二、週四 10:00～18:00，每 30 分鐘 | `ARTALE_SCHEDULE_DAYS=2,4`、`ARTALE_SCHEDULE_START=10:00`、`ARTALE_SCHEDULE_END=18:00`、`ARTALE_CHECK_INTERVAL_MINUTES=30` |
-| 平日 09:00～21:00，每 2 小時 | `ARTALE_SCHEDULE_DAYS=1-5`、`ARTALE_SCHEDULE_START=09:00`、`ARTALE_SCHEDULE_END=21:00`、`ARTALE_CHECK_INTERVAL_MINUTES=120` |
-| 每天全天，每小時整點 | `ARTALE_SCHEDULE_DAYS=1-7`、`ARTALE_SCHEDULE_START=00:00`、`ARTALE_SCHEDULE_END=23:00`、`ARTALE_CHECK_INTERVAL_MINUTES=60` |
+| 每週二、週四 10:00～18:00，每 30 分鐘 | `days: '2,4'`、`start: '10:00'`、`end: '18:00'`、`intervalMinutes: 30` |
+| 平日 09:00～21:00，每 2 小時 | `days: '1-5'`、`start: '09:00'`、`end: '21:00'`、`intervalMinutes: 120` |
+| 每天全天，每小時整點 | `days: '1-7'`、`start: '00:00'`、`end: '23:00'`、`intervalMinutes: 60` |
 
 常駐程式每次檢查結束後才安排下一次，同一程序不會同時跑兩次。電腦睡眠後喚醒，若仍在時段內會立即檢查一次，超過時段則略過。喚醒檢查也只往前查看設定的分鐘數，不補查整段睡眠時間。
 
@@ -287,37 +295,115 @@ ARTALE_SCHEDULE_TIMEZONE=Asia/Taipei
 pm2 start npm --name artale --no-autorestart -- run artale:schedule
 ```
 
+## Webhook 名稱與頭像變更提醒
+
+伺服器管理員可以在 Discord 頻道設定中更換這個 Webhook 的頭像與名稱，Discord 不會通知程式。Artale 每次正式檢查公告時（常駐排程的每個檢查時間點，或執行 `npm run artale`），程式會先查詢每個 Webhook 目前的名稱與頭像，與上次記錄比較；被更換時發送一則提醒。
+
+每個機器人的定位不同，所以在 `env/artale.js` 的 `webhooks` 中，**每個 Webhook 各自設定** `webhookProfile`，三者預設都是空的：
+
+```js
+webhooks: [
+  {
+    name: '自己的伺服器',
+    url: 'https://discord.com/api/webhooks/xxxxxxxx/yyyyyyyy',
+    webhookProfile: {
+      // 角色設定提示詞：有填寫時由 AI 以角色口吻寫感想
+      personaPrompt: '你是一隻傲嬌的貓，句尾會加「喵」',
+      // 沒有提示詞時直接發送的固定文字
+      avatarMessage: '我換新頭像了！',
+      nameMessage: '我從「{oldName}」改名為「{name}」了！',
+    },
+  },
+],
+```
+
+| 設定 | 發送內容 |
+| --- | --- |
+| 有角色設定提示詞 | 由 AI 以角色口吻寫感想，**取代**兩句固定文字。頭像被更換時把新頭像圖片附給 AI 看；名稱被更換時提供新舊名稱 |
+| 沒有提示詞，有固定文字 | 直接發送固定文字；被更換的項目沒有設定文字時略過該行。`{name}` 會換成目前名稱、`{oldName}` 會換成變更前的名稱 |
+| 三者都是空的（預設） | 不查詢、不發送 |
+
+只換頭像或只換名稱時發送一行；兩者同時被更換時發送兩行，**第一行頭像、第二行名稱**。例如：
+
+```text
+紫底配白色的圖案還算順眼啦，才沒有偷偷期待換成貓咪頭像喵
+從「Spidey Bot」改叫「新名字」也太隨便了吧，不過你叫的話，我還是會勉強回應喵
+```
+
+其他規則：
+
+- 第一次檢查，或改用另一個 Webhook 時，只記錄目前的名稱與頭像，不發送。
+- 記錄依 Webhook 存在 `data/artale/webhook-profiles/<Webhook ID>.json`，與其他主題分開；即使和其他主題使用同一個 Webhook，也各自偵測、各自發送自己的提醒。
+- AI 只看新頭像，不比較新舊頭像；自訂頭像被移除時不附圖，會告訴 AI 已改回 Discord 預設頭像。
+- AI 感想使用共用的 Codex 設定（`CODEX_BIN`、`CODEX_MODEL`）與 `CODEX_TIMEOUT_MS` 逾時設定，不開放網路搜尋；實測一次約 10 秒。
+- 查詢、AI 感想或發送失敗時不更新記錄，下次執行會再試；錯誤只記錄，不影響公告的發送。
+- 提示詞需要換行時，在 JS 字串中以 `\n` 表示換行，或改用反引號（`` ` ``）包住多行文字。
+- 只能在程式執行時發現變更，也無法得知是誰更換的；預覽模式（`npm run artale:preview`）不檢查。
+
+## 多個 Webhook
+
+同樣的公告要發送到多個 Discord 頻道或伺服器時，在 `env/artale.js` 的 `webhooks` 列出多個 Webhook：
+
+```js
+webhooks: [
+  { name: '自己的伺服器', url: 'https://discord.com/api/webhooks/xxxxxxxx/yyyyyyyy' },
+  {
+    name: '朋友的伺服器', // 只是給自己辨識的備註
+    url: 'https://discord.com/api/webhooks/xxxxxxxx/yyyyyyyy',
+    webhookProfile: { personaPrompt: '你是一位認真的冒險者公會櫃台小姐' }, // 這個機器人自己的角色
+  },
+],
+```
+
+| 欄位 | 必填 | 用途 |
+| --- | --- | --- |
+| `url` | 是 | Discord Webhook 網址 |
+| `name` | 否 | 給自己辨識用的備註，程式不會用它判斷任何事，只顯示在終端機紀錄中 |
+| `webhookProfile` | 否 | 這個 Webhook 的[名稱與頭像變更提醒](#webhook-名稱與頭像變更提醒)：`personaPrompt`、`avatarMessage`、`nameMessage`，未填寫時不發送提醒 |
+
+- 程式以網址中的 **Webhook ID** 區分每個 Webhook；`name` 只顯示在終端機紀錄中。欄位名稱寫錯或網址重複時會直接報錯。
+- 每篇公告只呼叫一次 Codex 產生摘要，所有 Webhook 收到的摘要內文相同，再依序發送到每個需要通知的 Webhook。
+- **公告去重紀錄依 Webhook 分開**：每個 Webhook 各自記錄已通知的版本。某個 Webhook 發送失敗不影響其他 Webhook，下次檢查只補發給失敗的 Webhook（仍需在本輪檢查範圍內）。
+- 新加入的 Webhook 從空紀錄開始，下次啟動檢查會收到第一頁各分類最新的公告。
+- 判斷「新公告」或「公告更新」是程式比對各 Webhook 的紀錄（公告 ID 與內容雜湊值），不經過 AI。同一篇公告對已收過舊版本的 Webhook 標示【公告更新】，版本更新等文字摘要的最前面再加一行「（公告已更新）」；對第一次收到的 Webhook 標示【新公告】。這些標示由程式加上，摘要內文都一樣。
+- 修改清單後需重新啟動 `npm run artale:schedule`。
+
 ## 設定參考
 
-Artale 設定放在 `env/.env.artale`，共用 Codex 設定放在 `env/.env.shared`。`ARTALE_STATE_FILE` 與 `ARTALE_DISCORD_MESSAGES_FILE` 的相對路徑以專案根目錄為準；手動指令的 `--file` 則以目前執行目錄為準。
+Artale 的所有設定集中在 `env/artale.js`（範例見 [env/artale.example.js](../env/artale.example.js)），以 `export default` 匯出設定物件，可以直接寫註解；除了 `webhooks` 以外都是選填，未填寫時使用預設值。欄位名稱寫錯或型別不符時，程式會指出設定檔與欄位名稱並停止。
 
-Artale 的 Webhook、排程及紀錄設定統一使用 `ARTALE_` 前綴，**不回退讀取舊的全域設定，也不讀取 `CRYPTO_` 的設定**。Codex 執行器、模型及摘要逾時仍為共用設定，與各主題的輪詢時間分開。
-
-### 舊環境遷移
-
-先停止原排程，再將根目錄舊 `.env` 中的 `ARTALE_` 設定移至 `env/.env.artale`，共用 Codex 設定移至 `env/.env.shared`；保留各欄位原值。若仍使用更早的全域變數，先依下表更名。
-
-同時將舊的 `data/state.json` 與 `data/discord-messages.jsonl` 搬至 `data/artale/`，保留原檔內容。若 `ARTALE_STATE_FILE` 或 `ARTALE_DISCORD_MESSAGES_FILE` 明確指定舊路徑，也需改成新位置；自訂路徑可繼續使用。確認目標沒有其他紀錄後再搬移，不要覆蓋不同內容的檔案。搬移紀錄可避免把既有公告當成尚未通知，並保留舊訊息 ID。
-
-程式不再讀取根目錄 `.env` 或舊的平面紀錄路徑。遷移完成後移除舊環境檔，再用 `npm run artale:schedule` 啟動。
-
-| 舊設定 | Artale 專屬設定 |
-| --- | --- |
-| `DISCORD_WEBHOOK_URL` | `ARTALE_DISCORD_WEBHOOK_URL` |
-| `SCHEDULE_DAYS`、`SCHEDULE_START`、`SCHEDULE_END`、`SCHEDULE_TIMEZONE` | 各自加上 `ARTALE_` 前綴 |
-| `CHECK_INTERVAL_MINUTES` | `ARTALE_CHECK_INTERVAL_MINUTES` |
-| `STATE_FILE`、`DISCORD_MESSAGES_FILE` | 各自加上 `ARTALE_` 前綴 |
+共用的 Codex 設定（執行檔、模型、API key、摘要逾時）放在 `env/.env.shared`，見[根目錄 README](../README.md#共用設定)。紀錄檔的相對路徑以專案根目錄為準；手動指令的 `--file` 則以目前執行目錄為準。系統環境變數不會覆寫 Artale 設定；只有 `ARTALE_CONFIG_FILE` 可用來改用其他設定檔。
 
 ### Artale 設定欄位
 
-| 變數 | 預設值 | 用途 |
+| 欄位 | 預設值 | 用途 |
 | --- | --- | --- |
-| `ARTALE_DISCORD_WEBHOOK_URL` | 無 | 正式發送及常駐排程必填；預覽不需要 |
-| `ARTALE_NEWS_CATEGORIES` | `maintenance,update,bm` | 選擇要檢查的分類，逗號分隔；發送順序固定為維護 → 更新 → 商城，其他分類接在後面 |
-| `ARTALE_STATE_FILE` | `data/artale/state.json` | 公告版本紀錄檔 |
-| `ARTALE_DISCORD_MESSAGES_FILE` | `data/artale/discord-messages.jsonl` | 最多保留最近 100 筆新增、修改及刪除操作紀錄，供 `webhook list` 查詢 |
+| `webhooks` | 無 | Webhook 清單，正式發送及常駐排程至少要一個；預覽不需要。每個 Webhook 的欄位見[多個 Webhook](#多個-webhook) |
+| `newsCategories` | `['maintenance', 'update', 'bm']` | 要檢查的分類；發送順序固定為維護 → 更新 → 商城，其他分類接在後面。也可寫成逗號分隔文字 |
+| `schedule.days` | `'2'` | 排程星期，見[自動排程](#自動排程) |
+| `schedule.start`、`schedule.end` | `'08:20'`、`'17:20'` | 每天第一次與最後一次檢查的時間 |
+| `schedule.intervalMinutes` | `60` | 檢查間隔與回溯分鐘數 |
+| `schedule.timeZone` | `'Asia/Taipei'` | 排程時區 |
+| `webhooks[].webhookProfile.personaPrompt` | `''` | 該 Webhook 的角色設定提示詞；有填寫時由 AI 寫頭像與名稱的感想，見[變更提醒](#webhook-名稱與頭像變更提醒) |
+| `webhooks[].webhookProfile.avatarMessage` | `''` | 沒有提示詞時，頭像被更換要發送的文字 |
+| `webhooks[].webhookProfile.nameMessage` | `''` | 沒有提示詞時，名稱被更換要發送的文字；與頭像同時變更時為第二行 |
+| `files.state` | `'data/artale/state.json'` | 公告版本紀錄檔（依 Webhook 分開記錄） |
+| `files.discordMessages` | `'data/artale/discord-messages.jsonl'` | 最多保留最近 100 筆新增、修改及刪除操作紀錄，供 `webhook list` 查詢 |
 
-排程變數見[自動排程](#自動排程)；Codex 共用設定與驗證方式見[根目錄 README](../README.md#共用設定)。
+### 舊環境遷移
+
+舊版的 `env/.env.artale`（`ARTALE_` 開頭的環境變數）已停用，檔案仍存在時程式會提醒搬移。先停止原排程，複製 [env/artale.example.js](../env/artale.example.js) 為 `env/artale.js`，依下表填入原值後刪除 `env/.env.artale`，再重新啟動：
+
+| 舊設定 | 新設定檔欄位 |
+| --- | --- |
+| `ARTALE_DISCORD_WEBHOOK_URL` | `webhooks: [{ url: '…' }]` |
+| `ARTALE_NEWS_CATEGORIES` | `newsCategories` |
+| `ARTALE_SCHEDULE_DAYS`、`_START`、`_END`、`_TIMEZONE` | `schedule.days`、`start`、`end`、`timeZone` |
+| `ARTALE_CHECK_INTERVAL_MINUTES` | `schedule.intervalMinutes` |
+| `ARTALE_PERSONA_PROMPT`、`ARTALE_AVATAR_CHANGED_MESSAGE`、`ARTALE_NAME_CHANGED_MESSAGE` | 該 Webhook 的 `webhookProfile.personaPrompt`、`avatarMessage`、`nameMessage` |
+| `ARTALE_STATE_FILE`、`ARTALE_DISCORD_MESSAGES_FILE` | `files.state`、`files.discordMessages` |
+
+舊版單一 Webhook 的公告去重紀錄（`data/artale/state.json`）會在下次正式執行時自動轉成依 Webhook 分開的格式，舊紀錄套用到當時設定的每個 Webhook，已通知的公告不會重發。更早期放在根目錄 `.env` 或 `data/state.json` 的設定與紀錄，請先搬到上述新位置；程式不再讀取根目錄 `.env`。
 
 ### 公告分類
 
@@ -330,7 +416,7 @@ Artale 的 Webhook、排程及紀錄設定統一使用 `ARTALE_` 前綴，**不�
 | `sanction` | 制裁 | [查看](https://artale.live/tw/news?category=sanction) |
 | `all` | 全部 | [查看](https://artale.live/tw/news) |
 
-例如在預設分類之外再加入活動：`ARTALE_NEWS_CATEGORIES=maintenance,update,bm,event`。其他分類依設定中的相對順序，接在維護、更新與商城之後發送。
+例如在預設分類之外再加入活動：`newsCategories: ['maintenance', 'update', 'bm', 'event']`。其他分類依設定中的相對順序，接在維護、更新與商城之後發送。
 
 各分類只檢查第一頁，維護與商城各選最新一篇、版本更新選最新三篇。啟動時直接比對所選公告，後續排程再套用本輪時間區間。依官網分類選取，不另外篩選標題。因此「版本更新」指官網 `update` 分類，該分類的兌換券或其他公告也可能成為本輪發送內容，以及維護發布時間的比較依據。
 
@@ -345,7 +431,9 @@ Node、Codex 與 Webhook 的共用問題，見[共用問題排查](../README.md#
 | 預覽顯示沒有變化，未印出內容 | 使用 `npm run artale:preview -- --force` |
 | 刪除 DC 公告後，重新執行仍顯示沒有變化 | 刪文不會清除公告去重紀錄；依[刪除後重新發布](#刪除後重新發布)使用 `--force`，不需刪除通知紀錄檔 |
 | 發送數量比預期少，或加上 `--force` 仍沒有公告 | 先確認所選分類與啟動／區間模式；維護、商城各最新一篇，更新最新三篇。`--window` 另受時間限制，維護仍受[發布時間判斷](#維護公告)限制，商城可能沒有可通知內容 |
-| 尚未設定 `ARTALE_DISCORD_WEBHOOK_URL` | 確認 `env/.env.artale` 已填入 Webhook 網址 |
+| 尚未設定 Webhook | 確認 `env/artale.js` 的 `webhooks` 已填入至少一個 Webhook |
+| 「env/.env.artale 已停用」 | 依[舊環境遷移](#舊環境遷移)搬到 `env/artale.js` 後刪除舊檔 |
+| 「env/artale.js 的 … 有不支援的欄位」或型別錯誤 | 依錯誤訊息指出的欄位修正設定檔，欄位名稱見[設定參考](#artale-設定欄位) |
 | 內容轉譯錯誤，排程停止 | 檢查官網結構及 `src/artale/client.js` 解析規則，修正後先預覽，再重新啟動排程 |
 
 ### 錯誤發生後會怎樣
@@ -377,27 +465,31 @@ Node、Codex 與 Webhook 的共用問題，見[共用問題排查](../README.md#
 
 程式只讀各分類第一頁，依官網發布時間選取各分類最新幾篇。啟動直接比對所選公告，區間檢查再以內文頁完整發布時間篩選本輪區間。每篇依公告 ID 與「標題＋內文」的 SHA-256 雜湊值比對版本；發布時間只影響是否落入範圍，不計入內容雜湊。
 
-紀錄檔預設為 `data/artale/state.json`，所有分類合計保留最近 100 筆。已記錄的相同版本會略過，超出保留範圍的舊版本則不受去重保護。商城沒有需通知內容時也會記錄，`notifiedAt` 表示完成處理的時間。
+紀錄檔預設為 `data/artale/state.json`，依 Webhook 分開記錄，每個 Webhook 所有分類合計保留最近 100 筆。已記錄的相同版本會略過，超出保留範圍的舊版本則不受去重保護。商城沒有需通知內容時也會記錄，`notifiedAt` 表示完成處理的時間。
 
-**公告去重紀錄沒有區分 Webhook。**若換到另一個群組但沿用同一份 `ARTALE_STATE_FILE`，相同版本仍會略過；可用 `npm run artale -- --force` 重發第一頁且符合篇數上限的公告。兩個群組若需各自追蹤更新，請分別設定不同的 `ARTALE_STATE_FILE`。這與按 Webhook 區分的 `ARTALE_DISCORD_MESSAGES_FILE` 發文紀錄不同。
+**公告去重紀錄依 Webhook 分開。**每個 Webhook 各自記錄已通知的版本，新加入的 Webhook 從空紀錄開始，下次啟動檢查會收到第一頁各分類最新的公告；從清單移除的 Webhook 紀錄保留在檔案中，不影響其他 Webhook。
 
-重發第一頁且符合篇數上限的公告使用 `npm run artale -- --force`；不在選取範圍的公告用手動 JSON 發文。刪除 `ARTALE_STATE_FILE` 會清除去重紀錄，但不會突破第一頁與篇數限制；`--window` 仍受時間範圍限制。
+重發第一頁且符合篇數上限的公告使用 `npm run artale -- --force`（會發送到每個 Webhook）；不在選取範圍的公告用手動 JSON 發文。刪除 `files.state` 指定的紀錄檔會清除去重紀錄，但不會突破第一頁與篇數限制；`--window` 仍受時間範圍限制。
 
 <details>
 <summary>查看紀錄檔格式</summary>
 
 ```json
 {
-  "notified": [
-    {
-      "id": "tsijzkrlsgtxs4f4aopbz7pe",
-      "hash": "ed9e1062a109ade31fb3909a5c0feb5f6782cb9d519d6e5211feacadb4ea73f8",
-      "title": "11/17（二）Artale World 更新公告",
-      "publishedAt": "2026.11.17 08:13",
-      "url": "https://artale.live/tw/news/tsijzkrlsgtxs4f4aopbz7pe",
-      "notifiedAt": "2026-11-17T04:45:14.485Z"
+  "targets": {
+    "<Webhook ID>": {
+      "notified": [
+        {
+          "id": "tsijzkrlsgtxs4f4aopbz7pe",
+          "hash": "ed9e1062a109ade31fb3909a5c0feb5f6782cb9d519d6e5211feacadb4ea73f8",
+          "title": "11/17（二）Artale World 更新公告",
+          "publishedAt": "2026.11.17 08:13",
+          "url": "https://artale.live/tw/news/tsijzkrlsgtxs4f4aopbz7pe",
+          "notifiedAt": "2026-11-17T04:45:14.485Z"
+        }
+      ]
     }
-  ]
+  }
 }
 ```
 
@@ -420,13 +512,14 @@ Node、Codex 與 Webhook 的共用問題，見[共用問題排查](../README.md#
 
 ```text
 env/
-├── .env.artale.example  # Artale 設定範例
-├── .env.artale          # Artale 正式設定，不納入版本控制
+├── artale.example.js  # Artale 設定檔範例
+├── artale.js          # Artale 正式設定檔，不納入版本控制
 ├── .env.shared.example  # 共用 Codex 設定範例
 └── .env.shared          # 共用正式設定，不納入版本控制
 data/artale/
-├── state.json          # 最近 100 筆公告版本
-└── discord-messages.jsonl # 最近 100 筆訊息操作
+├── state.json             # 每個 Webhook 最近 100 筆公告版本
+├── discord-messages.jsonl # 最近 100 筆訊息操作
+└── webhook-profiles/      # 每個 Webhook 名稱與頭像的上次記錄，用來偵測更換
 ```
 
 ### Artale 模組位置

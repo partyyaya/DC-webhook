@@ -1,11 +1,12 @@
 /**
  * 常駐排程入口（npm run crypto:schedule）：每天在指定時間發送一次新聞，預設每天 08:00（台灣時間）。
- * 排程可用 CRYPTO_SCHEDULE_DAYS、CRYPTO_SCHEDULE_TIME、CRYPTO_SCHEDULE_TIMEZONE 調整。
+ * 排程在 env/crypto.js 的 schedule 調整（days、time、timeZone）。
  *
  *   - 補發：啟動時或電腦睡眠喚醒後，若「今天的發送時間已過、但今天還沒發送完成」，立即發送一次。
  *     只補當天，不補前幾天。
  *   - 重試：發送失敗時隔 RETRY_MINUTES 分鐘再試，同一天最多 MAX_ATTEMPTS_PER_DAY 次，之後等隔天的排程。
- *   - 是否已發送以紀錄檔（data/crypto/state.json）的 completedDate 判斷，重新啟動也不會重複發送。
+ *   - 是否已發送以紀錄檔（data/crypto/state.json）中每個 Webhook 的 completedDate 判斷，重新啟動也不會重複發送；
+ *     有多個 Webhook 時，全部完成才算今天已發送，重試時只處理尚未完成的 Webhook。
  */
 import { setTimeout as sleep } from 'node:timers/promises';
 import { log, logError } from '../shared/log.js';
@@ -17,20 +18,20 @@ const MAX_ATTEMPTS_PER_DAY = 3;
 
 // 載入設定與主流程。環境變數設定有誤時，只顯示原因並結束，而不是一大段錯誤堆疊
 let config;
-let runDaily;
-let loadDigestState;
+let run;
 try {
   ({ config } = await import('./config.js'));
-  ({ runDaily } = await import('./run.js'));
-  ({ loadDigestState } = await import('./state.js'));
+  run = await import('./run.js');
 } catch (err) {
   logError(`設定錯誤，排程不啟動：${err.message}`);
   process.exit(1);
 }
 
 // 啟動前先確認 Webhook 已設定，沒設定就直接結束，避免每次排程都失敗
-if (!config.discordWebhookUrl) {
-  logError('尚未設定環境變數 CRYPTO_DISCORD_WEBHOOK_URL，排程不啟動。');
+try {
+  run.assertTargets();
+} catch (err) {
+  logError(`${err.message}，排程不啟動。`);
   process.exit(1);
 }
 
@@ -50,21 +51,21 @@ async function sleepUntil(target) {
 }
 
 /**
- * 今天是否已發送完成。紀錄檔損壞時無法判斷，停止排程等人工處理，避免每次都失敗或重複發送。
+ * 今天是否所有 Webhook 都已發送完成。紀錄檔損壞時無法判斷，停止排程等人工處理，避免每次都失敗或重複發送。
  *
  * @param {string} today 今天的日期（YYYY-MM-DD）
  * @returns {Promise<boolean>}
  */
 async function isCompleted(today) {
   try {
-    return (await loadDigestState(config.stateFile)).completedDate === today;
+    return run.isAllCompleted(await run.loadState(), today);
   } catch (err) {
     logError(`${err.message}，排程已停止。修正或移除紀錄檔後，請重新執行 npm run crypto:schedule。`);
     process.exit(1);
   }
 }
 
-log(`排程模式啟動：${describeSchedule(schedule)}；當天時間已過但尚未發送時會立即補發。`);
+log(`排程模式啟動：${describeSchedule(schedule)}；共 ${config.targets.length} 個 Webhook；當天時間已過但尚未發送時會立即補發。`);
 
 // 主迴圈：判斷今天是否需要發送 → 發送（失敗時稍後重試）→ 等到下一次排程時間，一直重複。
 // 每次發送完才計算下一次，所以不會有兩次發送同時進行的情況。
@@ -82,7 +83,7 @@ for (;;) {
   if (latestRunTimeToday(now, schedule) && attempts < MAX_ATTEMPTS_PER_DAY && !(await isCompleted(today))) {
     attempts++;
     try {
-      await runDaily();
+      await run.runDaily();
       continue;
     } catch (err) {
       logError(`執行失敗（今天第 ${attempts} 次）：${err.message}`);

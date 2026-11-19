@@ -111,23 +111,19 @@ const COMMON_RULES = [
  * 組出要交給 Codex 的提示詞：依分類選擇撰寫規則 + 公告標題、分類、發布時間 + 公告全文。
  * 想調整 Discord 訊息的內容或格式，修改上方的 UPDATE_PROMPT、SHOP_PROMPT、COMMON_RULES 即可。
  *
+ * 提示詞只依分類決定，與比對結果（新公告／公告更新）無關，同一篇公告的摘要可共用給所有 Webhook；
+ * 「（公告已更新）」等標示由 format.js 依各 Webhook 的比對結果加上，不交給 Codex 判斷。
+ *
  * @param {object} announcement 公告資料（title、category、publishedAt、content）
- * @param {'new' | 'updated' | 'unchanged'} kind 比對結果；版本更新格式在 updated 時會要求在最前面註明已更新
- *   （購物商場、維護的更新狀態由 Discord 卡片處理）
  * @param {string} [category] bm 使用商品 JSON，maintenance 使用維護時段 JSON，其他使用版本更新格式
  * @returns {string} 提示詞
  */
-export function buildSummaryPrompt(announcement, kind, category) {
+export function buildSummaryPrompt(announcement, category) {
   // 依分類選擇角色設定與專屬規則
   const isShop = category === 'bm';
   const isMaintenance = category === 'maintenance';
   const { intro, rules } = isShop ? SHOP_PROMPT : isMaintenance ? MAINTENANCE_PROMPT : UPDATE_PROMPT;
   const lines = [intro, '', '撰寫規則：', ...rules];
-
-  // 同一篇公告內容被修改時，多加一條規則，讓讀者知道這是更新版
-  if (kind === 'updated' && !isShop && !isMaintenance) {
-    lines.push('- 這是先前已通知過的公告修改後的版本，請在最前面單獨加一行「（公告已更新）」。');
-  }
 
   // 共用規則放在最後
   lines.push(...COMMON_RULES);

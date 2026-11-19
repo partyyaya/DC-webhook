@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { detectChange, hashAnnouncement, loadState, recordNotified, saveState } from '../../src/artale/state.js';
+import { detectChange, hashAnnouncement, loadState, recordNotified, saveState, targetState, withTargetState } from '../../src/artale/state.js';
 
 const sent = (id, hash) => ({ id, hash, title: id, notifiedAt: '2026-11-17T00:00:00.000Z' });
 
@@ -39,15 +39,29 @@ test('紀錄最新版本在最前面，且最多保留 100 筆', () => {
   assert.equal(state.notified[0].id, 'id104');
 });
 
-test('狀態檔可寫入後讀回，檔案不存在時回傳空紀錄', async () => {
+test('狀態檔依 Webhook 分開記錄，可寫入後讀回，檔案不存在時回傳空紀錄', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'dcwebhook-test-'));
   try {
     const file = path.join(dir, 'nested', 'state.json');
-    assert.deepEqual(await loadState(file), { notified: [] });
+    const empty = await loadState(file);
+    assert.deepEqual(empty, { targets: {} });
+    assert.deepEqual(targetState(empty, '111'), { notified: [] });
 
-    const state = recordNotified({ notified: [] }, sent('a', 'h1'));
-    await saveState(file, state);
-    assert.deepEqual(await loadState(file), state);
+    const state = withTargetState(empty, '111', recordNotified(targetState(empty, '111'), sent('a', 'h1')));
+    await saveState(file, { ...state, migrated: true });
+    assert.deepEqual(await loadState(file), state, '只寫入 targets，不寫入其他欄位');
+    assert.deepEqual(targetState(await loadState(file), '222'), { notified: [] });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('舊版單一 Webhook 格式以 legacy 回傳', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'dcwebhook-test-'));
+  try {
+    const file = path.join(dir, 'state.json');
+    await writeFile(file, JSON.stringify({ notified: [sent('a', 'h1')] }));
+    assert.deepEqual(await loadState(file), { targets: {}, legacy: { notified: [sent('a', 'h1')] } });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -67,6 +67,14 @@ test('需要網路搜尋時以 -c web_search="live" 開放，預設不開放', a
   assert.ok(!plain.args.includes('-c'));
 });
 
+test('附加圖片時以 --image 傳入，並放在其他選項之前', async () => {
+  const reply = await summarizeWithCodex('看圖', { bin: bins.ok, timeoutMs: 10_000, images: ['/tmp/a.png', '/tmp/b.png'] });
+  const { args } = JSON.parse(reply);
+  assert.deepEqual(args.slice(0, 5), ['exec', '--image', '/tmp/a.png', '--image', '/tmp/b.png']);
+  assert.equal(args[5], '--skip-git-repo-check');
+  assert.equal(args.at(-1), '-');
+});
+
 test('找不到 Codex CLI 時立即回報安裝方式', async () => {
   const startedAt = Date.now();
   await assert.rejects(

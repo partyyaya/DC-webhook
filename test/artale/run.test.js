@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -7,15 +7,24 @@ import { config } from '../../src/artale/config.js';
 import { listPosts } from '../../src/shared/posts.js';
 import { runOnce } from '../../src/artale/run.js';
 import { ContentParseError } from '../../src/artale/errors.js';
-import { loadState, saveState } from '../../src/artale/state.js';
+import { loadState, saveState, targetState } from '../../src/artale/state.js';
 
-async function setup(t, category, summary, { failSecond = false, content = '公告內容', titles = {}, contents = {}, publishedTimes = {}, entries = {} } = {}) {
+const target = (webhookId) => ({
+  name: '', webhookId, url: `https://discord.com/api/webhooks/${webhookId}/testToken${webhookId}`,
+  webhookProfile: { personaPrompt: '', avatarMessage: '', nameMessage: '' },
+});
+// 預設使用一個 Webhook（ID 111）；notified() 取得它的已通知版本
+const notified = async (webhookId = '111') => targetState(await loadState(config.stateFile), webhookId).notified;
+
+async function setup(t, category, summary, { failSecond = false, content = '公告內容', titles = {}, contents = {}, publishedTimes = {}, entries = {}, targets = [target('111')], failHooks = new Set() } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'dcwebhook-run-'));
   const original = { ...config };
   t.after(async () => { Object.assign(config, original); await rm(dir, { recursive: true, force: true }); });
   const bin = path.join(dir, 'fake-codex');
+  const countFile = path.join(dir, 'codex-count');
   await writeFile(bin, `#!${process.execPath}\nconst fs = require('node:fs');
 const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(countFile)}, 'x');
 const replies = ${JSON.stringify(summary)};
 const schemaIndex = args.indexOf('--output-schema');
 const schema = schemaIndex >= 0 ? JSON.parse(fs.readFileSync(args[schemaIndex + 1], 'utf8')) : null;
@@ -24,7 +33,7 @@ process.stdin.resume();
 process.stdin.on('end', () => fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], typeof replies === 'string' ? replies : replies[category]));
 `, { mode: 0o755 });
   Object.assign(config, {
-    newsCategories: Array.isArray(category) ? [...category] : [category], discordWebhookUrl: 'https://discord.com/api/webhooks/111/testToken',
+    newsCategories: Array.isArray(category) ? [...category] : [category], targets,
     stateFile: path.join(dir, 'state.json'), discordMessagesFile: path.join(dir, 'posts.jsonl'),
     codex: { bin, timeoutMs: 10_000 },
     schedule: { ...original.schedule, intervalMinutes: 60 },
@@ -33,13 +42,16 @@ process.stdin.on('end', () => fs.writeFileSync(args[args.indexOf('--output-last-
   t.mock.method(console, 'log', () => {});
   t.mock.method(console, 'error', () => {});
   const posts = [];
+  const hooks = [];
   const documents = new Map();
   t.mock.method(globalThis, 'fetch', async (input, options = {}) => {
     const url = new URL(input);
     if (url.hostname === 'discord.com') {
       assert.equal(options.method, 'POST');
+      const hook = url.pathname.match(/webhooks\/(\d+)\//)[1];
       posts.push(JSON.parse(options.body));
-      if (failSecond && posts.length === 2) return new Response('{"code":50035}', { status: 400 });
+      hooks.push(hook);
+      if ((failSecond && posts.length === 2) || failHooks.has(hook)) return new Response('{"code":50035}', { status: 400 });
       return new Response(JSON.stringify({ id: String(900000000000000000n + BigInt(posts.length)), channel_id: '333' }));
     }
     assert.equal(url.hostname, 'artale.live');
@@ -63,7 +75,8 @@ process.stdin.on('end', () => fs.writeFileSync(args[args.indexOf('--output-last-
     const head = `<header class="article-head"><div class="article-meta"><span>${article.publishedAt ?? publishedTimes[id] ?? '2026.11.17 08:30'}</span></div></header>`;
     return new Response(`${head}<script>self.__next_f.push(${JSON.stringify([1, flight])})</script>`);
   });
-  return { posts };
+  const codexCount = () => readFile(countFile, 'utf8').then((text) => text.length, () => 0);
+  return { posts, hooks, codexCount };
 }
 
 test('公告預覽不寫任何紀錄，正式發送保存訊息 ID，去重仍正常', async (t) => {
@@ -77,7 +90,7 @@ test('公告預覽不寫任何紀錄，正式發送保存訊息 ID，去重仍�
   assert.equal(record.messageId, '900000000000000001');
   assert.equal(record.announcementId, 'latest');
   assert.equal(record.category, 'update');
-  assert.equal((await loadState(config.stateFile)).notified.length, 1);
+  assert.equal((await notified()).length, 1);
   assert.equal(posts[0].embeds[0].url, 'https://artale.live/tw/news/latest');
   const [result] = await runOnce();
   assert.equal(result.status, 'unchanged');
@@ -110,7 +123,7 @@ test('維護公告發布一則訊息，內文只有維護時間並記錄為 main
   assert.equal(posts[0].embeds[0].description, '維護時間：11/24 07:00～12:00（GMT+8）');
   assert.equal(posts[0].embeds[0].url, 'https://artale.live/tw/news/latest');
   assert.equal((await listPosts(config.discordMessagesFile))[0].category, 'maintenance');
-  assert.equal((await loadState(config.stateFile)).notified.length, 1);
+  assert.equal((await notified()).length, 1);
 });
 
 test('維護摘要失敗的預覽不顯示公告全文，正式模式不發送或記錄', async (t) => {
@@ -139,8 +152,7 @@ test('三個及兩個分類同時有更新時，依維護、版本更新、商�
   ]);
 
   // 保留維護的版本紀錄，模擬這輪只有版本更新與商城有需通知的內容。
-  const state = await loadState(config.stateFile);
-  await saveState(config.stateFile, { notified: state.notified.filter(version => version.id === 'maintenance') });
+  await saveState(config.stateFile, { targets: { 111: { notified: (await notified()).filter(version => version.id === 'maintenance') } } });
   posts.length = 0;
   const next = await runOnce();
   assert.equal(next.find(result => result.category === 'maintenance').status, 'unchanged');
@@ -155,7 +167,7 @@ test('版本更新發布較晚時只略過維護，強制重發也不發過期�
   const results = await runOnce({ force: true });
   assert.equal(results.find(result => result.category === 'maintenance').status, 'outdated');
   assert.deepEqual(posts.map(post => post.embeds[0].url), ['https://artale.live/tw/news/update', 'https://artale.live/tw/news/bm']);
-  assert.ok((await loadState(config.stateFile)).notified.every(version => version.id !== 'maintenance'));
+  assert.ok((await notified()).every(version => version.id !== 'maintenance'));
   assert.ok((await listPosts(config.discordMessagesFile)).every(post => post.category !== 'maintenance'));
 });
 
@@ -214,7 +226,7 @@ test('09:20 檢查 08:20～09:20 內三篇不同公告，依時間發送並逐�
   const first = await runOnce();
   assert.deepEqual(first.map(item => item.announcement.id), ['first', 'second', 'third']);
   assert.deepEqual(posts.map(post => post.embeds[0].url.split('/').at(-1)), ['first', 'second', 'third']);
-  assert.equal((await loadState(config.stateFile)).notified.length, 3);
+  assert.equal((await notified()).length, 3);
   assert.equal((await listPosts(config.discordMessagesFile)).length, 3);
   const again = await runOnce();
   assert.ok(again.every(item => item.status === 'unchanged'));
@@ -296,7 +308,7 @@ test('其中一篇發送失敗，其他篇仍處理，範圍內重試只補發�
   ] } });
   await assert.rejects(runOnce(), /分類檢查失敗/);
   assert.equal(posts.length, 3);
-  assert.deepEqual((await loadState(config.stateFile)).notified.map(item => item.id), ['third', 'first']);
+  assert.deepEqual((await notified()).map(item => item.id), ['third', 'first']);
   const retry = await runOnce();
   assert.deepEqual(retry.map(item => item.status), ['unchanged', 'sent', 'unchanged']);
   assert.equal(posts.length, 4);
@@ -358,7 +370,7 @@ test('啟動及區間 force 都只比對維護最新一篇、更新最新三篇�
   const again = await runOnce({ startup: true });
   assert.ok(again.every(item => item.status === 'unchanged'));
   assert.equal(posts.length, 0);
-  assert.ok((await loadState(config.stateFile)).notified.every(item => expected.includes(item.id)));
+  assert.ok((await notified()).every(item => expected.includes(item.id)));
 });
 
 test('只比對最新維護，最新版本更新較晚時略過，不補發更舊維護', async t => {
@@ -385,4 +397,56 @@ test('最新維護已通知時不改發未通知的舊維護，只選維護也�
   assert.deepEqual(again.map(item => [item.announcement.id, item.status]), [['maintenance-new', 'unchanged']]);
   assert.equal(posts.length, 1);
   assert.equal(posts[0].embeds[0].url, 'https://artale.live/tw/news/maintenance-new');
+});
+
+test('多個 Webhook：摘要只產生一次，各自發送並各自記錄已通知的版本', async t => {
+  const { posts, hooks } = await setup(t, 'update', '- 更新項目', { targets: [target('111'), target('222')] });
+  await runOnce();
+  assert.deepEqual(hooks, ['111', '222']);
+  assert.deepEqual(posts[0], posts[1]);
+  assert.deepEqual((await notified('111')).map(item => item.id), ['latest']);
+  assert.deepEqual((await notified('222')).map(item => item.id), ['latest']);
+  assert.deepEqual((await listPosts(config.discordMessagesFile)).map(post => post.webhookId).sort(), ['111', '222']);
+  assert.deepEqual((await runOnce()).map(result => result.status), ['unchanged']);
+});
+
+test('多個 Webhook：其中一個失敗不影響其他，重試時只補發給失敗的 Webhook', async t => {
+  const failHooks = new Set(['222']);
+  const { hooks } = await setup(t, 'update', '- 更新項目', { targets: [target('111'), target('222')], failHooks });
+  await assert.rejects(runOnce(), /分類檢查失敗/);
+  assert.equal((await notified('111')).length, 1);
+  assert.equal((await notified('222')).length, 0);
+  failHooks.clear();
+  hooks.length = 0;
+  await runOnce();
+  assert.deepEqual(hooks, ['222'], '已成功的 Webhook 不重發');
+  assert.equal((await notified('222')).length, 1);
+});
+
+test('各 Webhook 紀錄不同時仍只呼叫一次 Codex，共用同一份摘要，只依各自紀錄加上標籤與（公告已更新）', async t => {
+  const { hooks, posts, codexCount } = await setup(t, 'update', '- 更新項目', { targets: [target('111'), target('222')] });
+  await saveState(config.stateFile, { targets: { 111: { notified: [{ id: 'latest', hash: 'old-version', title: '測試公告' }] } } });
+  await runOnce();
+  assert.equal(await codexCount(), 1);
+  assert.deepEqual(hooks, ['111', '222']);
+  const [updated, fresh] = posts.map(post => post.embeds[0]);
+  assert.match(updated.title, /^【公告更新】/, '111 收到過舊版本，標示為更新');
+  assert.match(fresh.title, /^【新公告】/, '222 第一次收到，標示為新公告');
+  assert.equal(updated.description, `（公告已更新）\n\n${fresh.description}`);
+  assert.equal(fresh.description, '- 更新項目');
+});
+
+test('舊版單一 Webhook 紀錄套用到目前設定的每個 Webhook，轉成新格式後不重發', async t => {
+  const { posts } = await setup(t, 'update', '- 更新項目');
+  await runOnce();
+  const versions = await notified('111');
+  // 改寫成舊格式，並新增第二個 Webhook
+  await writeFile(config.stateFile, JSON.stringify({ notified: versions }));
+  config.targets = [target('111'), target('222')];
+  posts.length = 0;
+  assert.deepEqual((await runOnce()).map(result => result.status), ['unchanged']);
+  assert.equal(posts.length, 0);
+  const saved = JSON.parse(await readFile(config.stateFile, 'utf8'));
+  assert.deepEqual(Object.keys(saved), ['targets']);
+  assert.deepEqual(saved.targets, { 111: { notified: versions }, 222: { notified: versions } });
 });

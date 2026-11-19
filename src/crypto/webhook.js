@@ -2,7 +2,7 @@
 import { runWebhookCommand } from '../webhook.js';
 
 try {
-  await runWebhookCommand(process.argv.slice(2), { source: 'crypto', loadEnv: true });
+  await runWebhookCommand(process.argv.slice(2), { source: 'crypto' });
 } catch (err) {
   console.error(`Crypto Webhook 操作失敗：${err.message}`);
   process.exitCode = 1;

@@ -1,7 +1,7 @@
 /**
  * 主流程模組：把各模組串起來，完成一次完整的公告檢查。
  *
- * 依 ARTALE_NEWS_CATEGORIES 設定的分類（預設「維護」、「更新」與「購物商場」）分兩個階段處理：
+ * 依設定檔 newsCategories 的分類（預設「維護」、「更新」與「購物商場」）分兩個階段處理：
  *
  *   第一階段：抓取並轉譯各分類第一頁中符合本輪範圍的公告  （client.js）
  *     任何一個分類發生「內容轉譯錯誤」（ContentParseError，通常是官網結構改變），
@@ -23,7 +23,7 @@ import { buildDiscordMessages } from './format.js';
 import { managePost } from '../shared/posts.js';
 import { ContentParseError } from './errors.js';
 import { log, logError } from '../shared/log.js';
-import { detectChange, hashAnnouncement, loadState, recordNotified, saveState } from './state.js';
+import { detectChange, hashAnnouncement, loadState, recordNotified, saveState, targetState, withTargetState } from './state.js';
 import {
   buildSummaryPrompt,
   MAINTENANCE_SCHEMA,
@@ -33,15 +33,36 @@ import {
   SHOP_SCHEMA,
 } from './summarize.js';
 import { summarizeWithCodex } from '../shared/codex.js';
+import { checkWebhookProfile } from '../shared/webhook-profile.js';
+import { describeTarget } from '../shared/targets.js';
 
 // 依比對結果（新公告／公告更新／強制重發）顯示對應的紀錄訊息
 const CHANGE_MESSAGES = {
-  new: '偵測到新公告，開始產生摘要…',
-  updated: '偵測到公告內容更新，開始產生摘要…',
-  unchanged: '已指定 --force，略過比對並重新發送…',
+  new: '偵測到新公告',
+  updated: '偵測到公告內容更新',
+  unchanged: '已指定 --force，略過比對並重新發送',
 };
 
 const NOTIFICATION_PRIORITY = { maintenance: 0, update: 1, bm: 2 };
+
+/** 確認至少設定了一個 Webhook。 */
+export function assertTargets() {
+  if (config.targets.length === 0) {
+    throw new Error('尚未設定 Webhook：請在 env/artale.js 的 webhooks 填入至少一個 Webhook（範例見 env/artale.example.js）');
+  }
+}
+
+/**
+ * 讀取公告去重紀錄。舊版單一 Webhook 格式的紀錄套用到目前設定的每個 Webhook（舊紀錄就是這些公告已通知過），
+ * 轉換結果在下次寫入紀錄時保存；之後新增的 Webhook 從空紀錄開始。
+ */
+async function loadStates() {
+  const state = await loadState(config.stateFile);
+  if (!state.legacy) return state;
+  const targets = { ...state.targets };
+  for (const { webhookId } of config.targets) targets[webhookId] ??= state.legacy;
+  return { targets, migrated: true };
+}
 const ANNOUNCEMENT_LIMITS = { maintenance: 1, update: 3, bm: 1 };
 
 /**
@@ -61,8 +82,16 @@ const ANNOUNCEMENT_LIMITS = { maintenance: 1, update: 3, bm: 1 };
  */
 export async function runOnce({ dryRun = false, force = false, startup = false, now = Date.now() } = {}) {
   // 正式發送前先確認 Webhook 已設定（預覽模式不需要）
-  if (!dryRun && !config.discordWebhookUrl) {
-    throw new Error('尚未設定環境變數 ARTALE_DISCORD_WEBHOOK_URL');
+  if (!dryRun) assertTargets();
+
+  // 正式執行時先檢查每個 Webhook 的名稱與頭像是否被更換；未設定提醒時不檢查，檢查失敗不影響公告檢查
+  if (!dryRun) {
+    for (const target of config.targets) {
+      await checkWebhookProfile(target.url, {
+        ...target.webhookProfile, codex: config.codex, historyFile: config.discordMessagesFile,
+        requestOptions: { timeoutMs: config.httpTimeoutMs },
+      });
+    }
   }
 
   // 整輪共用同一個時間快照，抓取及摘要耗時不會移動本輪範圍。
@@ -109,7 +138,8 @@ export async function runOnce({ dryRun = false, force = false, startup = false, 
 
   // 第二階段：逐一比對，有變化才摘要、發送、記錄。
   // 每篇公告處理成功後會更新紀錄，再交給下一篇比對。
-  let state = await loadState(config.stateFile);
+  let state = await loadStates();
+  if (state.migrated && !dryRun) await saveState(config.stateFile, state);
   const results = [];
   const notifications = fetched.filter(item => selected.has(item.category))
     .sort((a, b) => (NOTIFICATION_PRIORITY[a.category] ?? 3) - (NOTIFICATION_PRIORITY[b.category] ?? 3)
@@ -134,6 +164,7 @@ export async function runOnce({ dryRun = false, force = false, startup = false, 
       const result = await notifyIfChanged(item, state, { dryRun, force });
       state = result.state;
       results.push(result);
+      if (result.failedTargets?.length > 0) failedLabels.push(item.label);
     } catch (err) {
       logError(`[${item.label}] 處理失敗：${err.message}`);
       failedLabels.push(item.label);
@@ -147,65 +178,88 @@ export async function runOnce({ dryRun = false, force = false, startup = false, 
 }
 
 /**
- * 處理已抓到的單篇公告：比對 → 有變化才摘要、發送並記錄。
+ * 處理已抓到的單篇公告：每個 Webhook 各自比對 → 有變化的 Webhook 才摘要、發送並記錄。
+ * 每篇公告只呼叫一次 Codex 產生摘要，所有 Webhook 共用；標題標籤與「（公告已更新）」由程式依各 Webhook 的比對結果加上。
+ * 某個 Webhook 發送失敗不影響其他 Webhook，失敗的 Webhook 不記錄此版本，之後仍在檢查範圍內時再補發。
  *
  * @param {{category: string, label: string, announcement: object}} item 第一階段抓到的資料
- * @param {{notified: object[]}} state 目前的已發送紀錄
+ * @param {{targets: object}} state 目前的已發送紀錄
  * @param {{dryRun: boolean, force: boolean}} options
- * @returns {Promise<{category: string, status: string, state: object, announcement: object, messages?: object[]}>}
- *   回傳的 state 為處理後的紀錄（有發送時會包含剛發送的版本）
+ * @returns {Promise<{category: string, status: string, state: object, announcement: object, messages?: object[], failedTargets?: string[]}>}
+ *   回傳的 state 為處理後的紀錄（有發送成功的 Webhook 會包含剛發送的版本）
  */
 async function notifyIfChanged({ category, label, announcement }, state, { dryRun, force }) {
   // 每行紀錄前面加上分類名稱，例如「[購物商場] 公告：…」
   const say = (message) => log(`[${label}] ${message}`);
 
-  // 步驟 1：計算內容雜湊值，用公告 ID + 雜湊值比對已發送紀錄
+  // 步驟 1：計算內容雜湊值，每個 Webhook 各自用公告 ID + 雜湊值比對已發送紀錄。
+  // 預覽模式沒有設定 Webhook 時，以空紀錄比對（視為新公告）
   const hash = hashAnnouncement(announcement);
   say(`公告：${announcement.title}（ID ${announcement.id}，${announcement.publishedAt}，hash ${hash.slice(0, 12)}）`);
+  const targets = config.targets.length > 0 ? config.targets : [{ name: '預覽', webhookId: '' }];
+  const pending = targets
+    .map((target) => ({ target, change: detectChange(targetState(state, target.webhookId), announcement.id, hash) }))
+    .filter(({ change }) => change.changed || force);
 
-  // 步驟 2：完全沒有變化就跳過這篇公告
-  const change = detectChange(state, announcement.id, hash);
-  if (!change.changed && !force) {
+  // 步驟 2：所有 Webhook 都沒有變化就跳過這篇公告
+  if (pending.length === 0) {
     say('與已通知過的版本相同，沒有變化。');
     return { category, status: 'unchanged', state, announcement };
   }
-  say(CHANGE_MESSAGES[change.kind]);
 
-  // 步驟 3：有變化才呼叫共用 Codex 執行器產生摘要，再用 Artale 格式組出訊息（商城可能有多則）
-  const summary = await summarize(announcement, change.kind, category, dryRun, say);
-  const messages = buildDiscordMessages(announcement, summary, change.kind);
+  // 步驟 3：呼叫一次 Codex 產生摘要，所有 Webhook 共用；再依各 Webhook 的比對結果分組排版
+  // （標題標籤與「（公告已更新）」由程式加上），商城可能有多則訊息
+  const groups = new Map();
+  for (const { target, change } of pending) {
+    if (!groups.has(change.kind)) groups.set(change.kind, { targets: [] });
+    groups.get(change.kind).targets.push(target);
+  }
+  for (const [kind, group] of groups) {
+    say(`${CHANGE_MESSAGES[kind]}${config.targets.length > 1 ? `：${group.targets.map(describeTarget).join('、')}` : ''}`);
+  }
+  say('開始產生摘要…');
+  const summary = await summarize(announcement, category, dryRun, say);
+  for (const [kind, group] of groups) group.messages = buildDiscordMessages(announcement, summary, kind, category);
+  const messages = groups.values().next().value.messages;
 
   // 預覽模式：只印出將發送的內容，不發送也不寫紀錄
   if (dryRun) {
-    say(`--dry-run：不發送 Discord、不更新紀錄，預計發送 ${messages.length} 則訊息，內容如下：`);
-    console.log(JSON.stringify(messages, null, 2));
+    for (const [kind, group] of groups) {
+      say(`--dry-run：不發送 Discord、不更新紀錄，${groups.size > 1 ? `${kind} 版本` : ''}預計發送 ${group.messages.length} 則訊息，內容如下：`);
+      console.log(JSON.stringify(group.messages, null, 2));
+    }
     return { category, status: 'dry-run', state, announcement, messages };
   }
 
-  // 步驟 4：依序發送到 Discord；失敗不記錄公告版本，仍在後續檢查範圍時才重試。
-  for (const payload of messages) {
-    const post = await managePost('create', config.discordWebhookUrl, {
-      payload, historyFile: config.discordMessagesFile,
-      metadata: { announcementId: announcement.id, category, title: announcement.title },
-      requestOptions: { timeoutMs: config.httpTimeoutMs },
-    });
-    say(`Discord 訊息 ID：${post.messageId}`);
+  // 步驟 4：依序發送到每個需要通知的 Webhook；失敗的 Webhook 不記錄公告版本，仍在後續檢查範圍時才重試。
+  // 步驟 5：該 Webhook 發送成功或沒有需通知的內容時記錄此版本，避免重複通知或每次重新摘要
+  const version = { id: announcement.id, hash, title: announcement.title, publishedAt: announcement.publishedAt, url: announcement.url };
+  const failedTargets = [];
+  for (const [, group] of groups) {
+    for (const target of group.targets) {
+      const where = describeTarget(target);
+      try {
+        for (const payload of group.messages) {
+          const post = await managePost('create', target.url, {
+            payload, historyFile: config.discordMessagesFile,
+            metadata: { announcementId: announcement.id, category, title: announcement.title },
+            requestOptions: { timeoutMs: config.httpTimeoutMs },
+          });
+          say(`[${where}] Discord 訊息 ID：${post.messageId}`);
+        }
+        state = withTargetState(state, target.webhookId,
+          recordNotified(targetState(state, target.webhookId), { ...version, notifiedAt: new Date().toISOString() }));
+        await saveState(config.stateFile, state);
+        say(group.messages.length > 0
+          ? `[${where}] 已發送 ${group.messages.length} 則訊息到 Discord 並記錄此公告版本。`
+          : `[${where}] 沒有需通知的內容，不發送 Discord，已記錄此公告版本。`);
+      } catch (err) {
+        logError(`[${label}][${where}] 發送失敗：${err.message}`);
+        failedTargets.push(where);
+      }
+    }
   }
-
-  // 步驟 5：發送成功或沒有需通知的內容時記錄此版本，避免重複通知或每次重新摘要
-  const nextState = recordNotified(state, {
-    id: announcement.id,
-    hash,
-    title: announcement.title,
-    publishedAt: announcement.publishedAt,
-    url: announcement.url,
-    notifiedAt: new Date().toISOString(),
-  });
-  await saveState(config.stateFile, nextState);
-  say(messages.length > 0
-    ? `已發送 ${messages.length} 則訊息到 Discord 並記錄此公告版本。`
-    : '沒有需通知的內容，不發送 Discord，已記錄此公告版本。');
-  return { category, status: 'sent', state: nextState, announcement, messages };
+  return { category, status: failedTargets.length === pending.length ? 'failed' : 'sent', state, announcement, messages, failedTargets };
 }
 
 /**
@@ -217,16 +271,15 @@ async function notifyIfChanged({ category, label, announcement }, state, { dryRu
  * 預覽模式下則改用預覽內容代替，讓還沒安裝 Codex 時也能看到訊息長相。
  *
  * @param {object} announcement 公告資料（含標題、內文等）
- * @param {'new' | 'updated' | 'unchanged'} kind 比對結果
  * @param {string} category 分類代碼，決定使用購物商場、維護時間或版本更新格式
  * @param {boolean} dryRun 是否為預覽模式
  * @param {(message: string) => void} say 帶分類名稱的紀錄輸出函式
  * @returns {Promise<string | {products: object[], otherChanges: string[]}>} 文字摘要或購物商場的商品資料
  */
-async function summarize(announcement, kind, category, dryRun, say) {
+async function summarize(announcement, category, dryRun, say) {
   const isShop = category === 'bm';
   const isMaintenance = category === 'maintenance';
-  const prompt = buildSummaryPrompt(announcement, kind, category);
+  const prompt = buildSummaryPrompt(announcement, category);
   try {
     if (isMaintenance) {
       const reply = await summarizeWithCodex(prompt, { ...config.codex, schema: MAINTENANCE_SCHEMA });

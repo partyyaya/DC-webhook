@@ -30,12 +30,13 @@ const NO_MENTIONS = { parse: [] };
  * @param {object} announcement 公告資料
  * @param {string | {products: object[], otherChanges: string[]}} summary
  *   文字摘要（版本更新或維護時間）或購物商場的商品資料（見 summarize.js 的 parseShopSummary）
- * @param {'new' | 'updated' | 'unchanged'} kind 比對結果
+ * @param {'new' | 'updated' | 'unchanged'} kind 比對結果，決定標題標籤與是否註明（公告已更新）
+ * @param {string} [category] 分類代碼；維護公告只顯示維護時間，不加（公告已更新）
  * @returns {object[]} 依序發送的 Discord Webhook 請求內容（每個元素是一則訊息）
  */
-export function buildDiscordMessages(announcement, summary, kind) {
+export function buildDiscordMessages(announcement, summary, kind, category) {
   return typeof summary === 'string'
-    ? [buildDiscordPayload(announcement, summary, kind)]
+    ? [buildDiscordPayload(announcement, summary, kind, { markUpdated: category !== 'maintenance' })]
     : buildShopMessages(announcement, summary, kind);
 }
 
@@ -61,11 +62,14 @@ function buildHeaderEmbed(announcement, kind) {
  * @param {object} announcement 公告資料（title、url、category、publishedAt、thumbnail）
  * @param {string} summary Codex 產生的摘要
  * @param {'new' | 'updated' | 'unchanged'} kind 比對結果，決定標題標籤
+ * @param {{markUpdated?: boolean}} [options] markUpdated：公告更新時在內文最前面單獨加一行「（公告已更新）」
  * @returns {object} Discord Webhook 的請求內容
  */
-export function buildDiscordPayload(announcement, summary, kind) {
+export function buildDiscordPayload(announcement, summary, kind, { markUpdated = false } = {}) {
+  // 公告內容被修改時由程式註明，不交給 Codex 判斷
+  const text = markUpdated && kind === 'updated' ? `（公告已更新）\n${summary}` : summary;
   // 統一頂層項目間的空白，即使 Codex 未依格式輸出也保留一行間距。
-  const spacedSummary = summary.replace(/\r\n?/g, '\n').replace(/\n(?:[ \t]*\n)*(?=- )/g, '\n\n');
+  const spacedSummary = text.replace(/\r\n?/g, '\n').replace(/\n(?:[ \t]*\n)*(?=- )/g, '\n\n');
   const embed = {
     ...buildHeaderEmbed(announcement, kind),
     description: truncate(spacedSummary, DESCRIPTION_LIMIT),

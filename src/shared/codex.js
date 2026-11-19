@@ -2,7 +2,7 @@
  * 共用 Codex CLI 執行器，提示詞與輸出 Schema 由各通知來源提供。
  *
  * 實際執行的指令相當於：
- *   codex exec --skip-git-repo-check --ephemeral --sandbox read-only --color never \
+ *   codex exec [--image <圖片檔>] --skip-git-repo-check --ephemeral --sandbox read-only --color never \
  *     --output-last-message <暫存檔> [--output-schema <JSON Schema 檔>] [--model <模型>] \
  *     [-c web_search="live"] -
  * 提示詞從 stdin 傳入（最後的「-」），Codex 的最終回覆會寫到暫存檔再讀回來。
@@ -22,15 +22,17 @@ import path from 'node:path';
  * @param {number} options.timeoutMs 執行逾時時間，超過會強制終止
  * @param {object} [options.schema] JSON Schema；有指定時要求 Codex 回覆符合此格式的 JSON
  * @param {boolean} [options.webSearch=false] 開放 Codex 使用即時網路搜尋（需要查找最新資訊的來源使用）
+ * @param {string[]} [options.images=[]] 要附加給 Codex 看的圖片檔路徑
  * @returns {Promise<string>} 摘要文字（有指定 schema 時為 JSON 字串）
  */
-export async function summarizeWithCodex(prompt, { bin, model, timeoutMs, schema, webSearch = false }) {
+export async function summarizeWithCodex(prompt, { bin, model, timeoutMs, schema, webSearch = false, images = [] }) {
   // 建立一個空的暫存資料夾作為 Codex 的工作目錄，讓它看不到專案檔案，也用來存放輸出檔
   const workDir = await mkdtemp(path.join(os.tmpdir(), 'dcwebhook-codex-'));
   const outputFile = path.join(workDir, 'summary.md');
 
   // Codex CLI 參數：
   //   exec                    非互動模式，執行完就結束
+  //   --image                 附加圖片；可接多個檔案，所以放在其他選項前面，避免把最後的「-」當成圖片
   //   --skip-git-repo-check   允許在非 Git 資料夾（暫存資料夾）執行
   //   --ephemeral             不保存對話紀錄檔，避免每小時執行累積大量檔案
   //   --sandbox read-only     唯讀沙箱，Codex 無法修改任何檔案
@@ -41,6 +43,7 @@ export async function summarizeWithCodex(prompt, { bin, model, timeoutMs, schema
   //   -                       從 stdin 讀取提示詞
   const args = [
     'exec',
+    ...images.flatMap((image) => ['--image', image]),
     '--skip-git-repo-check',
     '--ephemeral',
     '--sandbox',

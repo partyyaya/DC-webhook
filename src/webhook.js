@@ -4,8 +4,10 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { parseWebhookUrl } from './shared/discord.js';
-import { loadProjectEnv, ROOT_DIR, SOURCES } from './shared/env.js';
+import { ROOT_DIR, SOURCES } from './shared/env.js';
 import { listPosts, managePost } from './shared/posts.js';
+import { parseWebhookTargets } from './shared/targets.js';
+import { loadTopicConfig } from './shared/topic-config.js';
 
 export const WEBHOOK_HELP = `用法：node src/webhook.js <create|edit|delete|list> [選項]
 也可使用：npm run webhook -- <操作> [選項]
@@ -18,8 +20,9 @@ export const WEBHOOK_HELP = `用法：node src/webhook.js <create|edit|delete|li
   list                                      查看本機發文紀錄與訊息 ID
 
 共用選項：
-  --source NAME       使用 artale 或 crypto 的專屬 Webhook 與紀錄設定
+  --source NAME       使用 artale 或 crypto 設定檔（env/<主題>.js）的 Webhook 與紀錄設定
   --webhook URL       改用指定 Webhook；未選來源時必填
+  --webhook-id ID     來源設定了多個 Webhook 時，指定要使用的 Webhook ID（可用 list 查看）
   --thread-id ID      訊息所在的討論串 ID（討論串訊息需提供）
   --history-file PATH 改用指定發文紀錄檔，未指定時使用來源的預設紀錄
   --dry-run           僅顯示操作內容，不連線、不修改或刪除訊息、不寫紀錄
@@ -65,17 +68,18 @@ function validatePayload(payload, action) {
   return { ...payload, allowed_mentions: { parse: [] } };
 }
 
-export async function runWebhookCommand(args, { env = process.env, output = console.log, requestOptions = {}, source: boundSource, loadEnv = false } = {}) {
+export async function runWebhookCommand(args, {
+  env = process.env, output = console.log, requestOptions = {}, source: boundSource, rootDir = ROOT_DIR,
+} = {}) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     content: { type: 'string' }, file: { type: 'string' },
-    'message-id': { type: 'string' }, webhook: { type: 'string' }, 'thread-id': { type: 'string' },
+    'message-id': { type: 'string' }, webhook: { type: 'string' }, 'webhook-id': { type: 'string' }, 'thread-id': { type: 'string' },
     source: { type: 'string' }, 'history-file': { type: 'string' }, 'dry-run': { type: 'boolean' }, help: { type: 'boolean' },
   } });
   if (values.help || positionals.length === 0) {
-    const boundPrefix = boundSource?.toUpperCase();
     output(boundSource
       ? WEBHOOK_HELP.replaceAll('node src/webhook.js', `node src/${boundSource}/webhook.js`).replaceAll('npm run webhook', `npm run ${boundSource}:webhook`)
-        + `\n此入口固定讀取 env/.env.${boundSource}：${boundPrefix}_DISCORD_WEBHOOK_URL、${boundPrefix}_DISCORD_MESSAGES_FILE。`
+        + `\n此入口固定使用 env/${boundSource}.js 的 webhooks 與 files.discordMessages。`
       : WEBHOOK_HELP);
     return;
   }
@@ -97,20 +101,47 @@ export async function runWebhookCommand(args, { env = process.env, output = cons
   if (['delete', 'list'].includes(action) && (hasContent || hasFile)) throw new Error('刪除或查詢不接受 --content、--file');
   if (action === 'list' && (values['thread-id'] !== undefined || values['dry-run'])) throw new Error('list 不接受 --thread-id 或 --dry-run');
 
-  if (loadEnv) loadProjectEnv(source, { env });
-  const prefix = source?.toUpperCase();
-  const defaultHistory = `data/${source ?? 'shared'}/discord-messages.jsonl`;
-  const historyFile = path.resolve(ROOT_DIR, values['history-file'] || (prefix && env[`${prefix}_DISCORD_MESSAGES_FILE`]) || defaultHistory);
-  const webhook = values.webhook ?? (prefix ? env[`${prefix}_DISCORD_WEBHOOK_URL`] : undefined);
+  if (values.webhook !== undefined && values['webhook-id'] !== undefined) throw new Error('--webhook 與 --webhook-id 請擇一');
+  if (values['webhook-id'] !== undefined && !source) throw new Error('--webhook-id 需搭配 --source 使用');
+
+  // 讀取主題設定檔中手動發文需要的欄位（webhooks、files.discordMessages），不檢查排程等其他設定
+  let targets = [];
+  let topicHistory;
+  let configLabel;
+  if (source) {
+    const { label, values: topic } = await loadTopicConfig(source, { env, rootDir });
+    configLabel = label;
+    targets = parseWebhookTargets(topic.webhooks, `${label} 的 webhooks`);
+    const history = topic.files?.discordMessages;
+    if (history !== undefined && typeof history !== 'string') throw new Error(`${label} 的 files.discordMessages 必須是文字`);
+    topicHistory = history;
+  }
+  const historyFile = path.resolve(rootDir, values['history-file'] || topicHistory || `data/${source ?? 'shared'}/discord-messages.jsonl`);
+
+  // 選擇 Webhook：--webhook 明確指定；否則使用設定檔的 webhooks，有多個時以 --webhook-id 選擇
+  let webhook = values.webhook;
+  if (webhook === undefined && source) {
+    if (values['webhook-id'] !== undefined) {
+      webhook = targets.find((target) => target.webhookId === values['webhook-id'])?.url;
+      if (!webhook) throw new Error(`${source} 的 Webhook 設定中沒有 ID ${values['webhook-id']}`);
+    } else if (targets.length === 1) {
+      webhook = targets[0].url;
+    }
+  }
   if (action === 'list') {
     const webhookId = webhook ? parseWebhookUrl(webhook).pathname.match(/\/webhooks\/(\d+)\//)[1] : undefined;
     const posts = await listPosts(historyFile, webhookId);
     output(JSON.stringify(posts, null, 2));
     return posts;
   }
-  if (!webhook) throw new Error(prefix
-    ? `請在 env/.env.${source} 設定 ${prefix}_DISCORD_WEBHOOK_URL，或用 --webhook 指定`
-    : '請用 --source 選擇來源，或用 --webhook 指定 Webhook');
+  if (!webhook) {
+    if (targets.length > 1) {
+      throw new Error(`${source} 設定了 ${targets.length} 個 Webhook，請用 --webhook-id 指定（${targets.map((target) => target.webhookId).join('、')}）`);
+    }
+    throw new Error(source
+      ? `請在 ${configLabel} 的 webhooks 填入 Webhook，或用 --webhook 指定`
+      : '請用 --source 選擇來源，或用 --webhook 指定 Webhook');
+  }
   const url = parseWebhookUrl(webhook);
   if (values['thread-id'] !== undefined) {
     if (!/^\d+$/.test(values['thread-id'])) throw new Error('--thread-id 必須是數字 ID');
@@ -146,7 +177,7 @@ export async function runWebhookCommand(args, { env = process.env, output = cons
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   try {
-    await runWebhookCommand(process.argv.slice(2), { loadEnv: true });
+    await runWebhookCommand(process.argv.slice(2));
   } catch (err) {
     console.error(`Webhook 操作失敗：${err.message}`);
     process.exitCode = 1;

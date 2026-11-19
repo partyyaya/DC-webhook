@@ -21,8 +21,8 @@ test('解析公告分類設定：去除空白、轉小寫、移除重複', () =>
 });
 
 test('不認得的分類或空白設定會拋錯並列出可用值', () => {
-  assert.throws(() => parseCategories('update,shop'), /ARTALE_NEWS_CATEGORIES 設定錯誤[\s\S]*bm（購物商場）/);
-  assert.throws(() => parseCategories(' , '), /ARTALE_NEWS_CATEGORIES 設定錯誤/);
+  assert.throws(() => parseCategories('update,shop'), /newsCategories 設定錯誤[\s\S]*bm（購物商場）/);
+  assert.throws(() => parseCategories(' , ', 'env/artale.js 的 newsCategories'), /env\/artale\.js 的 newsCategories 設定錯誤/);
 });
 
 test('組出分類列表網址，all 不帶分類參數', () => {

@@ -8,16 +8,16 @@ import {
   previewShopSummary,
 } from '../../src/artale/summarize.js';
 
-test('版本更新公告內容被修改時，提示詞會要求註明已更新（購物商場改由公告卡片註明）', () => {
+test('提示詞只依分類決定，不要求 Codex 註明公告已更新（由排版程式加上）', () => {
   const announcement = { title: '公告', category: '更新', publishedAt: '2026.11.17 08:13', content: '內容' };
-  assert.doesNotMatch(buildSummaryPrompt(announcement, 'new', 'update'), /修改後的版本/);
-  assert.match(buildSummaryPrompt(announcement, 'updated', 'update'), /修改後的版本/);
-  assert.doesNotMatch(buildSummaryPrompt(announcement, 'updated', 'bm'), /修改後的版本/);
+  for (const category of ['update', 'bm', 'maintenance']) {
+    assert.doesNotMatch(buildSummaryPrompt(announcement, category), /修改後的版本|（公告已更新）/);
+  }
 });
 
 test('版本更新公告：整理更新項目，每項 50 字以內並附連結', () => {
   const announcement = { title: '更新公告', category: '更新', publishedAt: '2026.11.17 08:13', content: '更新內容' };
-  const prompt = buildSummaryPrompt(announcement, 'new', 'update');
+  const prompt = buildSummaryPrompt(announcement, 'update');
   assert.match(prompt, /這次版本更新了什麼/);
   assert.match(prompt, /不超過 50 字/);
   assert.match(prompt, /每個更新項目之間空一行/);
@@ -26,9 +26,9 @@ test('版本更新公告：整理更新項目，每項 50 字以內並附連結'
   assert.match(prompt, /"""\n更新內容\n"""/);
 });
 
-test('維護公告只擷取維護時段，更新時也不在內文加入其他文字', () => {
+test('維護公告只擷取維護時段，不在內文加入其他文字', () => {
   const announcement = { title: '維護公告', category: '維護', publishedAt: '2026.11.17 08:00', content: '維護及補償資訊' };
-  const prompt = buildSummaryPrompt(announcement, 'updated', 'maintenance');
+  const prompt = buildSummaryPrompt(announcement, 'maintenance');
   assert.match(prompt, /periods：/);
   assert.match(prompt, /日期、開始時間、結束時間/);
   assert.match(prompt, /不要把公告發布時間/);
@@ -53,7 +53,7 @@ test('維護摘要不是時間 JSON 格式時拋錯，不回傳完整公告', ()
 
 test('購物商場公告：要求以 JSON 整理商品、WC 價格、內容物、圖片與連結', () => {
   const announcement = { title: '購物商場更新公告', category: '購物商場', publishedAt: '2026.11.17 08:12', content: '商品內容' };
-  const prompt = buildSummaryPrompt(announcement, 'new', 'bm');
+  const prompt = buildSummaryPrompt(announcement, 'bm');
   assert.match(prompt, /需要多少 WC/);
   for (const field of ['products', 'name', 'price', 'contents', 'image', 'links', 'purchaseConditions', 'purchaseLimit', 'salePeriod', 'otherChanges']) {
     assert.match(prompt, new RegExp(`${field}：`));

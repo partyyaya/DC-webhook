@@ -11,6 +11,8 @@
 - [Discord 發布內容](#discord-發布內容)
 - [預覽與手動操作](#預覽與手動操作)
 - [自動排程](#自動排程)
+- [多個 Webhook](#多個-webhook)
+- [Webhook 名稱與頭像變更提醒](#webhook-名稱與頭像變更提醒)
 - [設定參考](#設定參考)
 - [問題排查](#問題排查)
 - [運作機制與開發](#運作機制與開發)
@@ -19,15 +21,23 @@
 
 先完成根目錄 README 的[環境設置](../README.md#環境設置)，以下指令皆在專案根目錄執行。
 
-複製範例並填入 Crypto 頻道的 Webhook，範例見 [env/.env.crypto.example](../env/.env.crypto.example)：
+Crypto 的所有設定（Webhook、排程、新聞內容、提醒、紀錄位置）集中在一份 JS 設定檔 `env/crypto.js`，可以直接寫註解。先複製範例：
 
 ```bash
-cp env/.env.crypto.example env/.env.crypto
+cp env/crypto.example.js env/crypto.js
 ```
 
-```ini
-CRYPTO_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/xxxxxxxx/yyyyyyyy
+在 `webhooks` 填入 Crypto 頻道的 Webhook，其他欄位說明見範例檔 [env/crypto.example.js](../env/crypto.example.js) 與[設定參考](#設定參考)：
+
+```js
+export default {
+  webhooks: [
+    { name: '自己的伺服器', url: 'https://discord.com/api/webhooks/xxxxxxxx/yyyyyyyy' },
+  ],
+};
 ```
+
+要發送到多個 Webhook 時，在 `webhooks` 繼續加，見[多個 Webhook](#多個-webhook)。
 
 先預覽今天的新聞，不刪除、不發送 Discord，也不寫任何紀錄（Codex 網路搜尋約需數分鐘）：
 
@@ -51,21 +61,23 @@ Crypto 與 Artale 的排程彼此獨立，可以在兩個終端機分別執行 `
 
 | 分類 | 篇數（預設） | 選擇方式 |
 | --- | --- | --- |
-| 美國經濟新聞 | `CRYPTO_ECONOMY_NEWS_COUNT`（3） | 最重要的新聞：聯準會利率與官員談話、CPI／PCE、就業、GDP、零售銷售、美債殖利率、美股大盤、財政與關稅政策等 |
-| 虛擬貨幣新聞 | `CRYPTO_COIN_NEWS_COUNT`（最多 3） | `CRYPTO_PRIORITY_COINS` 的**每個幣種至少 1 則**，預設 **BTC → ADA（Cardano）→ ETH**；篇數少於幣種數量時依幣種順序只取前幾個；剩餘名額只放重要新聞 |
+| 美國經濟新聞 | `news.economyCount`（3） | 最重要的新聞：聯準會利率與官員談話、CPI／PCE、就業、GDP、零售銷售、美債殖利率、美股大盤、財政與關稅政策等 |
+| 虛擬貨幣新聞 | `news.coinCount`（最多 3） | `news.priorityCoins` 的**每個幣種至少 1 則**，預設 **BTC → ADA（Cardano）→ ETH**；篇數少於幣種數量時依幣種順序只取前幾個；剩餘名額只放重要新聞 |
 
 篇數可設定 1～10 則（一則 Discord 訊息最多 10 張卡片）。
 
 ### 幣種優先順序
 
-`CRYPTO_PRIORITY_COINS` 的**填寫順序就是優先順序**，同時決定 Codex 的搜尋順序與 Discord 的排列順序：
+`news.priorityCoins` 的**填寫順序就是優先順序**，同時決定 Codex 的搜尋順序與 Discord 的排列順序：
 
-```ini
-CRYPTO_PRIORITY_COINS=BTC,ADA,ETH   # BTC 最優先，其次 ADA，再來 ETH
+```js
+news: {
+  priorityCoins: ['BTC', 'ADA', 'ETH'], // BTC 最優先，其次 ADA，再來 ETH
+},
 ```
 
 - **每個幣種至少 1 則**：選該幣種在時間範圍內最重要的新聞。某個幣種完全沒有相關新聞時才會跳過。
-- **篇數少於幣種數量**時，依填寫順序只取前幾個幣種。例如 `BTC,ADA,ETH` 搭配 2 則，只發 BTC、ADA 各 1 則；前面的幣種沒有任何新聞時，才由下一個幣種遞補。
+- **篇數少於幣種數量**時，依填寫順序只取前幾個幣種。例如 `['BTC', 'ADA', 'ETH']` 搭配 2 則，只發 BTC、ADA 各 1 則；前面的幣種沒有任何新聞時，才由下一個幣種遞補。
 - **篇數多於幣種數量**時，各幣種 1 則之後的剩餘名額只放真正重要的新聞（例如價格大幅波動、ETF 資金流向、監管、重大技術升級、交易所或專案重大事件），可以是清單幣種的第 2 則、其他幣種或整體市場新聞；沒有重要新聞就少發，不會用例行行情評論、價格預測或公關稿補滿。
 - 發送前程式會檢查並依同樣順序排列：先替每個幣種保留 1 則，再依序放入其他新聞，最後依幣種順序排列，清單外的幣種排最後。
 - 一則新聞同時涉及多個幣種時，以清單中最優先的幣種作為代表，例如同時提到 BTC 與 ETH 的新聞算作 BTC。某個幣種沒有以它為主的新聞時，才會改用有提到它的新聞。
@@ -101,7 +113,7 @@ CRYPTO_PRIORITY_COINS=BTC,ADA,ETH   # BTC 最優先，其次 ADA，再來 ETH
 2. 刪除前一次發送的新聞訊息。訊息已被手動刪除（Discord 回傳 404）時略過；其他刪除失敗時**不發送今天的新聞**，等待重試。
 3. 發送今天的新聞，並記錄訊息 ID，供下一次刪除。
 
-只會刪除每日新聞流程自己發送、記錄在 `data/crypto/state.json` 的訊息；用 `npm run crypto:webhook` 手動發送的訊息不會被自動刪除。
+只會刪除每日新聞流程自己發送、記錄在 `data/crypto/state.json` 的訊息；用 `npm run crypto:webhook` 手動發送的訊息不會被自動刪除。有多個 Webhook 時，每個 Webhook 各自刪除自己前一次發送的新聞。
 
 ## 預覽與手動操作
 
@@ -118,30 +130,35 @@ npm run crypto -- --force
 
 ### 管理 Discord 發文
 
-手動新增、修改、刪除或查詢訊息，固定使用 `env/.env.crypto` 的 Webhook 與紀錄：
+手動新增、修改、刪除或查詢訊息，固定使用 `env/crypto.js` 的 `webhooks` 與 `files.discordMessages`：
 
 ```bash
 npm run crypto:webhook -- --help
 npm run crypto:webhook -- list
 npm run crypto:webhook -- delete --message-id 123456789012345678 --dry-run
+
+# 有多個 Webhook 時，新增、修改、刪除需用 --webhook-id 指定（ID 可從 list 的 webhookId 查到）
+npm run crypto:webhook -- create --webhook-id 1234567890 --content "測試" --dry-run
 ```
 
 用法與[共用 Webhook 工具](../README.md#共用-webhook-工具)相同。
 
 ## 自動排程
 
-修改 `env/.env.crypto`、`env/.env.shared` 或程式後，需重新啟動常駐程式才會載入新設定。排程可在 `env/.env.crypto` 設定：
+修改 `env/crypto.js`、`env/.env.shared` 或程式後，需重新啟動常駐程式才會載入新設定。排程在 `env/crypto.js` 的 `schedule` 設定：
 
-```ini
-CRYPTO_SCHEDULE_DAYS=1-7            # 1=週一，7=週日；支援 1-5、1,3,5 等寫法
-CRYPTO_SCHEDULE_TIME=08:00          # 每天發送時間
-CRYPTO_SCHEDULE_TIMEZONE=Asia/Taipei
+```js
+schedule: {
+  days: '1-7',            // 1=週一，7=週日；支援 '1-5'、'1,3,5' 等寫法
+  time: '08:00',          // 每天發送時間
+  timeZone: 'Asia/Taipei',
+},
 ```
 
 | 需求 | 設定範例 |
 | --- | --- |
-| 只在平日發送 | `CRYPTO_SCHEDULE_DAYS=1-5` |
-| 每天 21:30 發送 | `CRYPTO_SCHEDULE_TIME=21:30` |
+| 只在平日發送 | `days: '1-5'` |
+| 每天 21:30 發送 | `time: '21:30'` |
 
 排程行為：
 
@@ -159,24 +176,120 @@ CRYPTO_SCHEDULE_TIMEZONE=Asia/Taipei
 pm2 start npm --name crypto -- run crypto:schedule
 ```
 
+## 多個 Webhook
+
+同一份新聞要發送到多個 Discord 頻道或伺服器時，在 `env/crypto.js` 的 `webhooks` 列出多個 Webhook：
+
+```js
+webhooks: [
+  { name: '自己的伺服器', url: 'https://discord.com/api/webhooks/xxxxxxxx/yyyyyyyy' },
+  {
+    name: '朋友的伺服器', // 只是給自己辨識的備註
+    url: 'https://discord.com/api/webhooks/xxxxxxxx/yyyyyyyy',
+    webhookProfile: { personaPrompt: '你是一位冷靜的華爾街分析師' }, // 這個機器人自己的角色
+  },
+],
+```
+
+| 欄位 | 必填 | 用途 |
+| --- | --- | --- |
+| `url` | 是 | Discord Webhook 網址 |
+| `name` | 否 | 給自己辨識用的備註，程式不會用它判斷任何事，只顯示在終端機紀錄中 |
+| `webhookProfile` | 否 | 這個 Webhook 的[名稱與頭像變更提醒](#webhook-名稱與頭像變更提醒)：`personaPrompt`、`avatarMessage`、`nameMessage`，未填寫時不發送提醒 |
+
+運作方式：
+
+- 程式以網址中的 **Webhook ID** 區分每個 Webhook，不使用 `name`；欄位名稱寫錯（例如 `persona`）或網址重複時會直接報錯。
+- 新聞只用 Codex 搜尋一次，再依清單順序發送到每個 Webhook，費用與時間不會因 Webhook 變多而增加。
+- 每個 Webhook 只能刪除自己發送的訊息，所以每日紀錄依 Webhook 分開：每個 Webhook 各自刪除自己前一天的新聞、各自記錄今天是否完成。
+- 某個 Webhook 失敗（例如被對方刪除）不影響其他 Webhook；全部完成才算今天已發送，重試時只處理尚未完成的 Webhook。
+- 修改清單後需重新啟動 `npm run crypto:schedule`。從清單移除的 Webhook，它最後一次發送的新聞不會被自動刪除。
+
+## Webhook 名稱與頭像變更提醒
+
+伺服器管理員可以在 Discord 頻道設定中更換這個 Webhook 的頭像與名稱，Discord 不會通知程式。Crypto 每次正式執行時（每天的發送時間，或執行 `npm run crypto`），程式會先查詢每個 Webhook 目前的名稱與頭像，與上次記錄比較；被更換時發送一則提醒。
+
+每個機器人的定位不同，所以在 `env/crypto.js` 的 `webhooks` 中，**每個 Webhook 各自設定** `webhookProfile`，三者預設都是空的：
+
+```js
+webhooks: [
+  {
+    name: '自己的伺服器',
+    url: 'https://discord.com/api/webhooks/xxxxxxxx/yyyyyyyy',
+    webhookProfile: {
+      // 角色設定提示詞：有填寫時由 AI 以角色口吻寫感想
+      personaPrompt: '你是一隻傲嬌的貓，句尾會加「喵」',
+      // 沒有提示詞時直接發送的固定文字
+      avatarMessage: '我換新頭像了！',
+      nameMessage: '我從「{oldName}」改名為「{name}」了！',
+    },
+  },
+],
+```
+
+| 設定 | 發送內容 |
+| --- | --- |
+| 有角色設定提示詞 | 由 AI 以角色口吻寫感想，**取代**兩句固定文字。頭像被更換時把新頭像圖片附給 AI 看；名稱被更換時提供新舊名稱 |
+| 沒有提示詞，有固定文字 | 直接發送固定文字；被更換的項目沒有設定文字時略過該行。`{name}` 會換成目前名稱、`{oldName}` 會換成變更前的名稱 |
+| 三者都是空的（預設） | 不查詢、不發送 |
+
+只換頭像或只換名稱時發送一行；兩者同時被更換時發送兩行，**第一行頭像、第二行名稱**。例如：
+
+```text
+紫底配白色的圖案還算順眼啦，才沒有偷偷期待換成貓咪頭像喵
+從「Spidey Bot」改叫「新名字」也太隨便了吧，不過你叫的話，我還是會勉強回應喵
+```
+
+其他規則：
+
+- 第一次檢查，或改用另一個 Webhook 時，只記錄目前的名稱與頭像，不發送。
+- 記錄依 Webhook 存在 `data/crypto/webhook-profiles/<Webhook ID>.json`，與其他主題分開；即使和其他主題使用同一個 Webhook，也各自偵測、各自發送自己的提醒。
+- 有[多個 Webhook](#多個-webhook) 時，每個 Webhook 各自偵測，用自己的角色設定與提醒文字。
+- AI 只看新頭像，不比較新舊頭像；自訂頭像被移除時不附圖，會告訴 AI 已改回 Discord 預設頭像。
+- AI 感想使用共用的 Codex 設定（`CODEX_BIN`、`CODEX_MODEL`）與設定檔的 `codexTimeoutMs` 逾時設定，不開放網路搜尋；實測一次約 10 秒。
+- 查詢、AI 感想或發送失敗時不更新記錄，下次執行會再試；錯誤只記錄，不影響新聞的發送。
+- 提示詞需要換行時，在 JS 字串中以 `\n` 表示換行，或改用反引號（`` ` ``）包住多行文字。
+- 只能在程式執行時發現變更，也無法得知是誰更換的；預覽模式（`npm run crypto:preview`）不檢查。
+- 提醒在當天新聞之前發送；它不列入每日新聞紀錄，隔天不會被刪除。
+
 ## 設定參考
 
-Crypto 設定放在 `env/.env.crypto`，共用 Codex 設定（`CODEX_BIN`、`CODEX_MODEL`、`CODEX_API_KEY`）放在 `env/.env.shared`。Crypto 的設定統一使用 `CRYPTO_` 前綴，不讀取 `ARTALE_` 的設定。
+Crypto 的所有設定集中在 `env/crypto.js`（範例見 [env/crypto.example.js](../env/crypto.example.js)），以 `export default` 匯出設定物件，可以直接寫註解；除了 `webhooks` 以外都是選填，未填寫時使用預設值。欄位名稱寫錯或型別不符時，程式會指出設定檔與欄位名稱並停止。
 
-| 變數 | 預設值 | 用途 |
+共用的 Codex 設定（`CODEX_BIN`、`CODEX_MODEL`、`CODEX_API_KEY`）放在 `env/.env.shared`。系統環境變數不會覆寫 Crypto 設定；只有 `CRYPTO_CONFIG_FILE` 可用來改用其他設定檔。
+
+| 欄位 | 預設值 | 用途 |
 | --- | --- | --- |
-| `CRYPTO_DISCORD_WEBHOOK_URL` | 無（正式發送必填） | Crypto 頻道的 Webhook |
-| `CRYPTO_PRIORITY_COINS` | `BTC,ADA,ETH` | 虛擬貨幣新聞的優先幣種，填寫順序即優先順序 |
-| `CRYPTO_ECONOMY_NEWS_COUNT` | `3` | 美國經濟新聞篇數（1～10） |
-| `CRYPTO_COIN_NEWS_COUNT` | `3` | 虛擬貨幣新聞篇數（1～10） |
-| `CRYPTO_SCHEDULE_DAYS` | `1-7` | 發送的星期 |
-| `CRYPTO_SCHEDULE_TIME` | `08:00` | 每天發送時間 |
-| `CRYPTO_SCHEDULE_TIMEZONE` | `Asia/Taipei` | 排程與新聞時間使用的時區 |
-| `CRYPTO_CODEX_TIMEOUT_MS` | `600000`（10 分鐘） | Codex 搜尋與整理的逾時時間；網路搜尋較久，不使用共用的 `CODEX_TIMEOUT_MS` |
-| `CRYPTO_STATE_FILE` | `data/crypto/state.json` | 每日新聞紀錄 |
-| `CRYPTO_DISCORD_MESSAGES_FILE` | `data/crypto/discord-messages.jsonl` | 訊息操作紀錄 |
+| `webhooks` | 無 | Webhook 清單，正式發送至少要一個；預覽不需要。每個 Webhook 的欄位見[多個 Webhook](#多個-webhook) |
+| `webhooks[].webhookProfile.personaPrompt` | `''` | 該 Webhook 的角色設定提示詞；有填寫時由 AI 寫頭像與名稱的感想，見[變更提醒](#webhook-名稱與頭像變更提醒) |
+| `webhooks[].webhookProfile.avatarMessage` | `''` | 沒有提示詞時，頭像被更換要發送的文字 |
+| `webhooks[].webhookProfile.nameMessage` | `''` | 沒有提示詞時，名稱被更換要發送的文字；與頭像同時變更時為第二行 |
+| `schedule.days` | `'1-7'` | 發送的星期 |
+| `schedule.time` | `'08:00'` | 每天發送時間 |
+| `schedule.timeZone` | `'Asia/Taipei'` | 排程與新聞時間使用的時區 |
+| `news.priorityCoins` | `['BTC', 'ADA', 'ETH']` | 虛擬貨幣新聞的優先幣種，填寫順序即優先順序；也可寫成逗號分隔文字 |
+| `news.economyCount` | `3` | 美國經濟新聞篇數（1～10） |
+| `news.coinCount` | `3` | 虛擬貨幣新聞最多篇數（1～10） |
+| `codexTimeoutMs` | `600000`（10 分鐘） | Codex 搜尋與整理的逾時時間；網路搜尋較久，不使用共用的 `CODEX_TIMEOUT_MS` |
+| `files.state` | `'data/crypto/state.json'` | 每日新聞紀錄（依 Webhook 分開） |
+| `files.discordMessages` | `'data/crypto/discord-messages.jsonl'` | 訊息操作紀錄 |
 
 紀錄檔的相對路徑以專案根目錄為準。
+
+### 舊環境遷移
+
+舊版的 `env/.env.crypto`（`CRYPTO_` 開頭的環境變數）已停用，檔案仍存在時程式會提醒搬移。先停止原排程，複製 [env/crypto.example.js](../env/crypto.example.js) 為 `env/crypto.js`，依下表填入原值後刪除 `env/.env.crypto`，再重新啟動：
+
+| 舊設定 | 新設定檔欄位 |
+| --- | --- |
+| `CRYPTO_DISCORD_WEBHOOK_URL` | `webhooks: [{ url: '…' }]` |
+| `CRYPTO_PERSONA_PROMPT`、`CRYPTO_AVATAR_CHANGED_MESSAGE`、`CRYPTO_NAME_CHANGED_MESSAGE` | 該 Webhook 的 `webhookProfile.personaPrompt`、`avatarMessage`、`nameMessage` |
+| `CRYPTO_SCHEDULE_DAYS`、`_TIME`、`_TIMEZONE` | `schedule.days`、`time`、`timeZone` |
+| `CRYPTO_PRIORITY_COINS`、`CRYPTO_ECONOMY_NEWS_COUNT`、`CRYPTO_COIN_NEWS_COUNT` | `news.priorityCoins`、`economyCount`、`coinCount` |
+| `CRYPTO_CODEX_TIMEOUT_MS` | `codexTimeoutMs` |
+| `CRYPTO_STATE_FILE`、`CRYPTO_DISCORD_MESSAGES_FILE` | `files.state`、`files.discordMessages` |
+
+舊版單一 Webhook 的每日紀錄（`data/crypto/state.json`）會在下次正式執行時自動轉成依 Webhook 分開的格式，仍能刪除前一天的新聞。
 
 ## 問題排查
 
@@ -184,9 +297,12 @@ Node、Codex 與 Webhook 的共用問題，見[共用問題排查](../README.md#
 
 | 現象 | 處理方式 |
 | --- | --- |
-| 尚未設定 `CRYPTO_DISCORD_WEBHOOK_URL` | 確認 `env/.env.crypto` 已填入 Webhook 網址 |
+| 尚未設定 Webhook | 確認 `env/crypto.js` 的 `webhooks` 已填入至少一個 Webhook |
+| 「env/.env.crypto 已停用」 | 依[舊環境遷移](#舊環境遷移)搬到 `env/crypto.js` 後刪除舊檔 |
+| 「env/crypto.js 的 … 有不支援的欄位」、型別錯誤或「網址無效」 | 依錯誤訊息指出的欄位或第 N 個 Webhook 修正設定檔，欄位名稱見[設定參考](#設定參考) |
+| 手動發文顯示「設定了 N 個 Webhook，請用 --webhook-id 指定」 | 加上 `--webhook-id <ID>`，ID 可從 `list` 的 `webhookId` 查到 |
 | 執行後顯示「今天的新聞已發送過」 | 需要重新發送時使用 `npm run crypto -- --force` |
-| Codex 逾時 | 調高 `CRYPTO_CODEX_TIMEOUT_MS` |
+| Codex 逾時 | 調高設定檔的 `codexTimeoutMs` |
 | 「刪除前一次的新聞訊息失敗，未發送今天的新聞」 | 確認 Webhook 沒有被更換或刪除；修正後執行 `npm run crypto` |
 | 更換 Webhook 後舊新聞沒有被刪除 | 新 Webhook 無法刪除舊 Webhook 的訊息，請在 Discord 手動刪除 |
 | 讀取狀態檔失敗，排程停止 | 紀錄檔損壞；確認內容或移除 `data/crypto/state.json` 後重新啟動（移除後前一次的新聞不會被自動刪除） |
@@ -197,18 +313,19 @@ Node、Codex 與 Webhook 的共用問題，見[共用問題排查](../README.md#
 
 ```text
 env/
-├── .env.crypto.example  # Crypto 設定範例
-└── .env.crypto          # Crypto 正式設定，不納入版本控制
+├── crypto.example.js           # Crypto 設定檔範例
+└── crypto.js                   # Crypto 正式設定檔，不納入版本控制
 data/crypto/
-├── state.json           # 最後發送完成的日期，以及下次要刪除的新聞訊息 ID
-└── discord-messages.jsonl # 最近 100 筆訊息操作
+├── state.json                  # 每個 Webhook 最後發送完成的日期，以及下次要刪除的新聞訊息 ID
+├── discord-messages.jsonl      # 最近 100 筆訊息操作
+└── webhook-profiles/           # 每個 Webhook 名稱與頭像的上次記錄，用來偵測更換
 ```
 
 ### 調整新聞內容與排版
 
 | 想調整的內容 | 位置 |
 | --- | --- |
-| 每個分類的篇數、優先幣種 | `env/.env.crypto`，見[設定參考](#設定參考) |
+| 每個分類的篇數、優先幣種 | `env/crypto.js` 的 `news`，見[設定參考](#設定參考) |
 | 搜尋與撰寫規則 | `src/crypto/news.js` 的 `buildNewsPrompt()` |
 | 提示詞中幣種的中文名稱、全名對照 | `src/crypto/news.js` 的 `COIN_NAMES`、`COIN_ALIASES` |
 | 訊息標題、卡片顏色與版面 | `src/crypto/format.js` |
@@ -221,7 +338,8 @@ data/crypto/
 | 單次執行、常駐排程、手動發文入口 | `src/crypto/index.js`、`scheduler.js`、`webhook.js` |
 | Crypto 設定 | `src/crypto/config.js` |
 | 主流程（搜尋 → 刪除 → 發送 → 記錄） | `src/crypto/run.js` |
-| 每日新聞紀錄 | `src/crypto/state.js` |
+| 每日新聞紀錄（依 Webhook 分開） | `src/crypto/state.js` |
+| Webhook 清單讀取（共用） | `src/shared/targets.js` |
 | 專屬測試 | `test/crypto/` |
 
 共用 Discord、Codex 與排程工具的位置，見[共用專案結構](../README.md#專案結構)。

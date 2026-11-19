@@ -5,29 +5,22 @@ import { parseEnv } from 'node:util';
 
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
-/** 支援的設定來源；各來源讀取 env/.env.<來源>，設定使用大寫來源名稱作為前綴。 */
+/** 支援的主題；各主題的設定放在 env/<主題>.js（見 topic-config.js）。 */
 export const SOURCES = ['artale', 'crypto'];
 
-/** 載入共用與指定來源環境檔；優先順序為系統環境變數 > 來源檔 > 共用檔。 */
-export function loadProjectEnv(source, { rootDir = ROOT_DIR, env = process.env } = {}) {
-  if (source !== undefined && !SOURCES.includes(source)) throw new Error('不支援的環境設定來源');
+/**
+ * 載入共用環境檔 env/.env.shared（Codex 執行檔、模型、API key 等所有主題共用的設定）。
+ * 系統環境變數優先，包含已設定的空值。各主題的設定不放在這裡，以主題前綴開頭的變數會被忽略。
+ */
+export function loadProjectEnv({ rootDir = ROOT_DIR, env = process.env } = {}) {
   const sourcePrefix = new RegExp(`^(${SOURCES.map(name => name.toUpperCase()).join('|')})_`);
-  const loaded = {};
-  for (const name of ['shared', ...(source ? [source] : [])]) {
-    const file = path.join(rootDir, 'env', `.env.${name}`);
-    let content;
-    try { content = readFileSync(file, 'utf8'); } catch (err) {
-      if (err.code === 'ENOENT') continue;
-      throw new Error(`無法讀取環境設定 env/.env.${name}`);
-    }
-    for (const [key, value] of Object.entries(parseEnv(content))) {
-      // 共用檔不提供主題設定；來源檔只接受自身前綴，避免其他主題設定混入。
-      const allowed = name === 'shared' ? !sourcePrefix.test(key) : key.startsWith(`${name.toUpperCase()}_`);
-      if (allowed) loaded[key] = value;
-    }
+  let content;
+  try { content = readFileSync(path.join(rootDir, 'env', '.env.shared'), 'utf8'); } catch (err) {
+    if (err.code === 'ENOENT') return env;
+    throw new Error('無法讀取環境設定 env/.env.shared');
   }
-  for (const [key, value] of Object.entries(loaded)) {
-    if (env[key] === undefined) env[key] = value;
+  for (const [key, value] of Object.entries(parseEnv(content))) {
+    if (!sourcePrefix.test(key) && env[key] === undefined) env[key] = value;
   }
   return env;
 }

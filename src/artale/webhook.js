@@ -2,7 +2,7 @@
 import { runWebhookCommand } from '../webhook.js';
 
 try {
-  await runWebhookCommand(process.argv.slice(2), { source: 'artale', loadEnv: true });
+  await runWebhookCommand(process.argv.slice(2), { source: 'artale' });
 } catch (err) {
   console.error(`Artale Webhook 操作失敗：${err.message}`);
   process.exitCode = 1;

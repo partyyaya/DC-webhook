@@ -4,6 +4,7 @@
  *   npm run artale                執行一次完整檢查
  *   npm run artale:preview          預覽模式，不發送也不寫紀錄
  *   npm run artale -- --force     忽略比對結果，強制重新發送
+ *   npm run artale -- --category bm   這次只處理指定分類（逗號分隔），不修改設定檔
  *
  * 結束碼：0 = 成功；1 = 一般錯誤；2 = 內容轉譯錯誤（官網結構可能改變，未發送任何訊息）
  */
@@ -17,6 +18,7 @@ const { values } = parseArgs({
     'dry-run': { type: 'boolean', default: false },
     force: { type: 'boolean', default: false },
     window: { type: 'boolean', default: false },
+    category: { type: 'string' },
   },
 });
 
@@ -25,6 +27,11 @@ try {
   // 在 try 裡才載入主流程（連帶載入 config.js）：環境變數設定有誤時，
   // 錯誤會在這裡被接住並只顯示原因，而不是一大段錯誤堆疊
   const { runOnce } = await import('./run.js');
+  // --category：這次只處理指定分類，覆寫設定檔的 newsCategories
+  if (values.category !== undefined) {
+    const [{ config }, { parseCategories }] = await Promise.all([import('./config.js'), import('./client.js')]);
+    config.newsCategories = parseCategories(values.category, '--category');
+  }
   await runOnce({ dryRun: values['dry-run'], force: values.force, startup: !values.window });
 } catch (err) {
   if (err instanceof ContentParseError) {

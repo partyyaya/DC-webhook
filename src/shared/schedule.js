@@ -1,7 +1,7 @@
 /**
  * 排程時間模組：解析排程相關的環境變數，並計算「下一次檢查時間」、判斷「現在是否在排程時段內」。
  *
- * 排程設定由各來源的 config.js 讀取後傳入；以下為欄位名稱，Artale 實際加上 ARTALE_ 前綴：
+ * 排程設定由各主題的 config.js 從主題設定檔讀取後傳入；錯誤訊息使用的欄位名稱可由呼叫端指定。預設名稱如下：
  *   SCHEDULE_DAYS           星期幾，1～7（1=週一、7=週日），可用逗號與範圍，例如 2、1-5、2,4
  *   SCHEDULE_START          每天開始檢查的時間（HH:MM）
  *   SCHEDULE_END            每天最後一次檢查的時間（HH:MM）
@@ -27,20 +27,21 @@ const formatters = new Map();
  * @param {string} raw.end SCHEDULE_END 原始字串
  * @param {number} raw.intervalMinutes 檢查間隔（分鐘）
  * @param {string} raw.timeZone 時區名稱
- * @param {{envPrefix?: string}} [options] 錯誤訊息使用的環境變數前綴
+ * @param {{names?: {days?: string, start?: string, end?: string, timeZone?: string}}} [options] 錯誤訊息使用的設定名稱
  * @returns {{days: Set<number>, start: number, end: number, intervalMinutes: number, timeZone: string}}
  *   days 為 0～6 的星期集合（0=週日）；start、end 為「當天第幾分鐘」（08:20 → 500）
  */
-export function createSchedule({ days, start, end, intervalMinutes, timeZone }, { envPrefix = '' } = {}) {
+export function createSchedule({ days, start, end, intervalMinutes, timeZone }, { names = {} } = {}) {
+  const name = { days: 'SCHEDULE_DAYS', start: 'SCHEDULE_START', end: 'SCHEDULE_END', timeZone: 'SCHEDULE_TIMEZONE', ...names };
   const schedule = {
-    days: parseDays(days, `${envPrefix}SCHEDULE_DAYS`),
-    start: parseTime(start, `${envPrefix}SCHEDULE_START`),
-    end: parseTime(end, `${envPrefix}SCHEDULE_END`),
+    days: parseDays(days, name.days),
+    start: parseTime(start, name.start),
+    end: parseTime(end, name.end),
     intervalMinutes,
-    timeZone: validateTimeZone(timeZone, `${envPrefix}SCHEDULE_TIMEZONE`),
+    timeZone: validateTimeZone(timeZone, name.timeZone),
   };
   if (schedule.start > schedule.end) {
-    throw new Error(`${envPrefix}SCHEDULE_START（${start}）不能晚於 ${envPrefix}SCHEDULE_END（${end}），目前不支援跨越午夜的時段`);
+    throw new Error(`${name.start}（${start}）不能晚於 ${name.end}（${end}），目前不支援跨越午夜的時段`);
   }
   return schedule;
 }

@@ -31,13 +31,15 @@ globalThis.Date = class extends RealDate {
 };
 const pages = [];
 const details = [];
+const categories = [];
 let discordRequests = 0;
-process.on('exit', () => console.log('ENTRY_RESULT=' + JSON.stringify({ pages, details, discordRequests })));
+process.on('exit', () => console.log('ENTRY_RESULT=' + JSON.stringify({ pages, details, categories, discordRequests })));
 globalThis.fetch = async input => {
   const url = new URL(input);
   if (url.hostname === 'discord.com') { discordRequests++; throw new Error('測試不應呼叫 Discord'); }
   if (url.pathname === '/tw/news') {
     const page = Number(url.searchParams.get('page') || 1);
+    categories.push(url.searchParams.get('category'));
     pages.push(page);
     if (page !== 1) throw new Error('不應讀取第二頁');
     return new Response('<a class="row" href="/tw/news/old"><span class="tag">更新</span><span class="title">舊公告</span><span class="date">2026.11.16</span></a><a href="?category=update&amp;page=2">2</a>');
@@ -51,14 +53,17 @@ timers.setTimeout = async ms => {
 };
 syncBuiltinESMExports();
 `);
+  const configFile = path.join(dir, 'artale-config.js');
+  await writeFile(configFile, `export default ${JSON.stringify({
+    webhooks: [{ url: 'https://discord.com/api/webhooks/111/testToken' }],
+    newsCategories: ['update'],
+    schedule: { days: '2', start: '08:20', end: '17:20', intervalMinutes: 60, timeZone: 'Asia/Taipei' },
+    files: { state: stateFile, discordMessages: historyFile },
+  })};`);
   const { stdout } = await promisify(execFile)(process.execPath, ['--import', preload,
     fileURLToPath(new URL(`../../src/artale/${entry}`, import.meta.url)), ...args], {
     timeout: 10_000,
-    env: { ...process.env, ARTALE_DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/111/testToken',
-      ARTALE_NEWS_CATEGORIES: 'update', ARTALE_STATE_FILE: stateFile, ARTALE_DISCORD_MESSAGES_FILE: historyFile,
-      ARTALE_SCHEDULE_DAYS: '2', ARTALE_SCHEDULE_START: '08:20', ARTALE_SCHEDULE_END: '17:20',
-      ARTALE_SCHEDULE_TIMEZONE: 'Asia/Taipei', ARTALE_CHECK_INTERVAL_MINUTES: '60',
-      CODEX_BIN: '/missing-codex', CODEX_TIMEOUT_MS: '1000' },
+    env: { ...process.env, ARTALE_CONFIG_FILE: configFile, CODEX_BIN: '/missing-codex', CODEX_TIMEOUT_MS: '1000' },
   });
   const result = JSON.parse(stdout.match(/^ENTRY_RESULT=(.+)$/m)[1]);
   assert.equal(result.discordRequests, 0);
@@ -72,6 +77,15 @@ test('單次執行及預覽啟動時比對第一頁舊公告，既有版本不�
     assert.deepEqual(result.pages, [1]);
     assert.deepEqual(result.details, ['/tw/news/old']);
   }
+});
+
+test('單次執行加 --category 時只處理指定分類，不修改設定檔；分類錯誤時明確失敗', async t => {
+  assert.deepEqual((await runEntry(t, { args: ['--dry-run', '--force'] })).categories, ['update']);
+  assert.deepEqual((await runEntry(t, { args: ['--dry-run', '--force', '--category', 'bm'] })).categories, ['bm']);
+  await assert.rejects(runEntry(t, { args: ['--dry-run', '--category', 'shop'] }), (err) => {
+    assert.match(err.stderr, /--category 設定錯誤：「shop」/);
+    return true;
+  });
 });
 
 test('單次執行加 --window 時維持區間檢查，不讀取區間外正文', async t => {
