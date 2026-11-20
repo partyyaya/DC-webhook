@@ -98,7 +98,7 @@ npm run artale:schedule
 | 版本更新 | 更新項目、關鍵日期與數值、相關頁面連結；每項說明要求 50 字以內，項目之間空一行 | 一張公告卡片 |
 | 購物商場 | 商品名稱、WC 價格、內容物名稱、圖片、相關頁面連結、購買資訊 | 公告卡片 → 各商品先圖片再文字 → 其他異動（有才顯示） |
 
-公告標題顯示於最上方，不顯示分類欄位、發布時間或底部時間戳。卡片底部保留「摘要由 Codex 自動產生，詳細內容請以官方公告為準」；商城拆成多則時，只放在最後一張文字卡片。不顯示分類橫幅，保留商品圖片。
+公告標題顯示於最上方，不顯示分類欄位、發布時間或底部時間戳。卡片底部保留「摘要由 AI 自動產生，詳細內容請以官方公告為準」；商城拆成多則時，只放在最後一張文字卡片。不顯示分類橫幅，保留商品圖片。
 
 新公告標為【新公告】，同篇內容變更標為【公告更新】，強制重發已記錄的相同版本標為【公告】。**官網修改公告時，程式會另發一則更新訊息，保留舊訊息，不會自動刪除或覆寫。**判斷依公告 ID 與內容版本，不以是否同一天區分。
 
@@ -109,7 +109,7 @@ npm run artale:schedule
 - 「內容物、購買條件、可購買次數、販售時間」以清單呈現，欄位標題使用粗體，各項直接換行、不插入空白行，例如 `- **內容物：**道具名稱`。
 - 每個商品文字卡片最後，依序列出「購買條件、可購買次數、販售時間」；公告沒寫的項目直接省略整行。
 - 限購資訊保留帳號／角色限制、重置週期與時間；販售時間保留起訖日期及「維護前／維護後」等說明。
-- 摘要規則要求 Codex 排除下架、刪除、移除、停止販售或結束販售的商品，「其他異動」也不列入。仍在販售、只註明未來截止時間的商品會保留。
+- 摘要規則要求 AI 排除下架、刪除、移除、停止販售或結束販售的商品，「其他異動」也不列入。仍在販售、只註明未來截止時間的商品會保留。
 - 整理後沒有任何需通知內容時，不發送訊息，但會記錄該版本，避免每次重新處理。
 
 下架排除規則只適用於購物商場（`bm`）；版本更新公告仍可能列出結束販售的資訊。活動、制裁等其他分類使用版本更新格式；維護使用下方的時間格式。
@@ -201,7 +201,7 @@ npm run artale:preview -- --force --category maintenance
 預覽不需要設定 Webhook。確認後，將同一指令中的 `npm run artale:preview` 改為 `npm run artale`，就會實際發送到設定的每個 Webhook。
 
 <details>
-<summary>尚未安裝 Codex，或預覽時摘要失敗</summary>
+<summary>尚未安裝 AI CLI，或預覽時摘要失敗</summary>
 
 預覽模式會顯示失敗原因，並使用簡易內容代替：
 
@@ -217,7 +217,7 @@ npm run artale:preview -- --force --category maintenance
 
 ## 管理 Discord 發文
 
-Artale 專用入口固定使用 `env/artale.js` 的 `webhooks` 與 `files.discordMessages`，不檢查公告、排程或 Codex 設定。也可直接執行 `node src/artale/webhook.js <操作> ...`。設定了多個 Webhook 時，新增、修改、刪除需加上 `--webhook-id <ID>` 指定（ID 可從 `list` 的 `webhookId` 查到）。
+Artale 專用入口固定使用 `env/artale.js` 的 `webhooks` 與 `files.discordMessages`，不檢查公告、排程或 AI 設定。也可直接執行 `node src/artale/webhook.js <操作> ...`。設定了多個 Webhook 時，新增、修改、刪除需加上 `--webhook-id <ID>` 指定（ID 可從 `list` 的 `webhookId` 查到）。
 
 ```bash
 # 新增訊息；加 --dry-run 可先預覽
@@ -335,7 +335,7 @@ webhooks: [
 - 第一次檢查，或改用另一個 Webhook 時，只記錄目前的名稱與頭像，不發送。
 - 記錄依 Webhook 存在 `data/artale/webhook-profiles/<Webhook ID>.json`，與其他主題分開；即使和其他主題使用同一個 Webhook，也各自偵測、各自發送自己的提醒。
 - AI 只看新頭像，不比較新舊頭像；自訂頭像被移除時不附圖，會告訴 AI 已改回 Discord 預設頭像。
-- AI 感想使用共用的 Codex 設定（`CODEX_BIN`、`CODEX_MODEL`）與 `CODEX_TIMEOUT_MS` 逾時設定，不開放網路搜尋；實測一次約 10 秒。
+- AI 感想使用共用的 AI 設定（`AI_PROVIDER` 與對應的執行檔、模型）與 `AI_TIMEOUT_MS` 逾時設定，不開放網路搜尋；實測一次約 10 秒。
 - 查詢、AI 感想或發送失敗時不更新記錄，下次執行會再試；錯誤只記錄，不影響公告的發送。
 - 提示詞需要換行時，在 JS 字串中以 `\n` 表示換行，或改用反引號（`` ` ``）包住多行文字。
 - 只能在程式執行時發現變更，也無法得知是誰更換的；預覽模式（`npm run artale:preview`）不檢查。
@@ -362,7 +362,7 @@ webhooks: [
 | `webhookProfile` | 否 | 這個 Webhook 的[名稱與頭像變更提醒](#webhook-名稱與頭像變更提醒)：`personaPrompt`、`avatarMessage`、`nameMessage`，未填寫時不發送提醒 |
 
 - 程式以網址中的 **Webhook ID** 區分每個 Webhook；`name` 只顯示在終端機紀錄中。欄位名稱寫錯或網址重複時會直接報錯。
-- 每篇公告只呼叫一次 Codex 產生摘要，所有 Webhook 收到的摘要內文相同，再依序發送到每個需要通知的 Webhook。
+- 每篇公告只呼叫一次 AI 產生摘要，所有 Webhook 收到的摘要內文相同，再依序發送到每個需要通知的 Webhook。
 - **公告去重紀錄依 Webhook 分開**：每個 Webhook 各自記錄已通知的版本。某個 Webhook 發送失敗不影響其他 Webhook，下次檢查只補發給失敗的 Webhook（仍需在本輪檢查範圍內）。
 - 新加入的 Webhook 從空紀錄開始，下次啟動檢查會收到第一頁各分類最新的公告。
 - 判斷「新公告」或「公告更新」是程式比對各 Webhook 的紀錄（公告 ID 與內容雜湊值），不經過 AI。同一篇公告對已收過舊版本的 Webhook 標示【公告更新】，版本更新等文字摘要的最前面再加一行「（公告已更新）」；對第一次收到的 Webhook 標示【新公告】。這些標示由程式加上，摘要內文都一樣。
@@ -372,7 +372,7 @@ webhooks: [
 
 Artale 的所有設定集中在 `env/artale.js`（範例見 [env/artale.example.js](../env/artale.example.js)），以 `export default` 匯出設定物件，可以直接寫註解；除了 `webhooks` 以外都是選填，未填寫時使用預設值。欄位名稱寫錯或型別不符時，程式會指出設定檔與欄位名稱並停止。
 
-共用的 Codex 設定（執行檔、模型、API key、摘要逾時）放在 `env/.env.shared`，見[根目錄 README](../README.md#共用設定)。紀錄檔的相對路徑以專案根目錄為準；手動指令的 `--file` 則以目前執行目錄為準。系統環境變數不會覆寫 Artale 設定；只有 `ARTALE_CONFIG_FILE` 可用來改用其他設定檔。
+共用的 AI 設定（使用的 AI、執行檔、模型、API key、摘要逾時）放在 `env/.env.shared`，見[根目錄 README](../README.md#共用設定)。紀錄檔的相對路徑以專案根目錄為準；手動指令的 `--file` 則以目前執行目錄為準。系統環境變數不會覆寫 Artale 設定；只有 `ARTALE_CONFIG_FILE` 可用來改用其他設定檔。
 
 ### Artale 設定欄位
 
@@ -424,7 +424,7 @@ Artale 的所有設定集中在 `env/artale.js`（範例見 [env/artale.example.
 
 ## 問題排查
 
-Node、Codex 與 Webhook 的共用問題，見[共用問題排查](../README.md#問題排查)。
+Node、AI CLI 與 Webhook 的共用問題，見[共用問題排查](../README.md#問題排查)。
 
 | 現象 | 處理方式 |
 | --- | --- |
@@ -441,7 +441,7 @@ Node、Codex 與 Webhook 的共用問題，見[共用問題排查](../README.md#
 | 錯誤類型 | 發送與紀錄 | 常駐排程 |
 | --- | --- | --- |
 | 內容轉譯錯誤 | 整次所有分類都不發送、不寫紀錄 | 以結束碼 `2` 停止，需修正後重啟 |
-| 網路、Codex 或 Discord 錯誤 | 抓取失敗的分類本輪略過；摘要或發送失敗只略過該篇，其他已取得的公告繼續處理 | 繼續排程；下次仍出現在第一頁、位於最新篇數上限及時間區間內時才重試 |
+| 網路、AI 或 Discord 錯誤 | 抓取失敗的分類本輪略過；摘要或發送失敗只略過該篇，其他已取得的公告繼續處理 | 繼續排程；下次仍出現在第一頁、位於最新篇數上限及時間區間內時才重試 |
 
 若訊息已成功送出，但後續訊息或紀錄檔寫入失敗，重試時可能重複發送。程式只有在該篇公告全部訊息成功後才記錄該篇版本；每則成功訊息的 ID 則另寫入發文紀錄，可用[管理 Discord 發文](#管理-discord-發文)查詢或撤回。
 
@@ -514,7 +514,7 @@ Node、Codex 與 Webhook 的共用問題，見[共用問題排查](../README.md#
 env/
 ├── artale.example.js  # Artale 設定檔範例
 ├── artale.js          # Artale 正式設定檔，不納入版本控制
-├── .env.shared.example  # 共用 Codex 設定範例
+├── .env.shared.example  # 共用 AI 設定範例
 └── .env.shared          # 共用正式設定，不納入版本控制
 data/artale/
 ├── state.json             # 每個 Webhook 最近 100 筆公告版本
@@ -533,4 +533,4 @@ data/artale/
 | 內容轉譯錯誤類型 | `src/artale/errors.js` |
 | 專屬測試 | `test/artale/` |
 
-共用 Discord、Codex 與排程工具的位置，見[共用專案結構](../README.md#專案結構)。
+共用 Discord、AI 與排程工具的位置，見[共用專案結構](../README.md#專案結構)。

@@ -123,7 +123,7 @@ test('購物商場：每個商品先圖片卡片、再文字卡片，最後是�
   assert.equal(others.description, '- 常駐禮包價格調整');
   assert.equal(others.fields, undefined);
   assert.equal(others.timestamp, undefined);
-  assert.ok(others.footer.text.includes('Codex'));
+  assert.ok(others.footer.text.includes('AI 自動產生'));
 });
 
 test('購物商場公告內容被修改時，公告卡片註明（公告已更新）', () => {

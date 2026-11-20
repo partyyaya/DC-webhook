@@ -63,7 +63,7 @@ syncBuiltinESMExports();
   const { stdout } = await promisify(execFile)(process.execPath, ['--import', preload,
     fileURLToPath(new URL(`../../src/artale/${entry}`, import.meta.url)), ...args], {
     timeout: 10_000,
-    env: { ...process.env, ARTALE_CONFIG_FILE: configFile, CODEX_BIN: '/missing-codex', CODEX_TIMEOUT_MS: '1000' },
+    env: { ...process.env, ARTALE_CONFIG_FILE: configFile, AI_PROVIDER: 'codex', CODEX_BIN: '/missing-codex', AI_TIMEOUT_MS: '1000' },
   });
   const result = JSON.parse(stdout.match(/^ENTRY_RESULT=(.+)$/m)[1]);
   assert.equal(result.discordRequests, 0);

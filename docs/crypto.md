@@ -1,6 +1,6 @@
 # Crypto 每日新聞
 
-每天以 Codex CLI 網路搜尋前 24 小時的**美國經濟新聞**與**虛擬貨幣新聞**，各整理最重要的幾則繁體中文摘要（預設各 3 則）；發送前會先刪除前一次的新聞訊息，頻道只保留最新一天的內容。
+每天以 AI（Codex 或 Claude，見[共用設定](../README.md#共用設定)）網路搜尋前 24 小時的**美國經濟新聞**與**虛擬貨幣新聞**，各整理最重要的幾則繁體中文摘要（預設各 3 則）；發送前會先刪除前一次的新聞訊息，頻道只保留最新一天的內容。
 
 [返回共用說明](../README.md) · [環境設置](../README.md#環境設置) · [共用 Webhook 工具](../README.md#共用-webhook-工具)
 
@@ -39,7 +39,7 @@ export default {
 
 要發送到多個 Webhook 時，在 `webhooks` 繼續加，見[多個 Webhook](#多個-webhook)。
 
-先預覽今天的新聞，不刪除、不發送 Discord，也不寫任何紀錄（Codex 網路搜尋約需數分鐘）：
+先預覽今天的新聞，不刪除、不發送 Discord，也不寫任何紀錄（AI 網路搜尋約需數分鐘）：
 
 ```bash
 npm run crypto:preview
@@ -68,7 +68,7 @@ Crypto 與 Artale 的排程彼此獨立，可以在兩個終端機分別執行 `
 
 ### 幣種優先順序
 
-`news.priorityCoins` 的**填寫順序就是優先順序**，同時決定 Codex 的搜尋順序與 Discord 的排列順序：
+`news.priorityCoins` 的**填寫順序就是優先順序**，同時決定 AI 的搜尋順序與 Discord 的排列順序：
 
 ```js
 news: {
@@ -81,13 +81,13 @@ news: {
 - **篇數多於幣種數量**時，各幣種 1 則之後的剩餘名額只放真正重要的新聞（例如價格大幅波動、ETF 資金流向、監管、重大技術升級、交易所或專案重大事件），可以是清單幣種的第 2 則、其他幣種或整體市場新聞；沒有重要新聞就少發，不會用例行行情評論、價格預測或公關稿補滿。
 - 發送前程式會檢查並依同樣順序排列：先替每個幣種保留 1 則，再依序放入其他新聞，最後依幣種順序排列，清單外的幣種排最後。
 - 一則新聞同時涉及多個幣種時，以清單中最優先的幣種作為代表，例如同時提到 BTC 與 ETH 的新聞算作 BTC。某個幣種沒有以它為主的新聞時，才會改用有提到它的新聞。
-- 可寫代號或常見全名（例如 `Cardano` 會換成 `ADA`、`NIGHT` 會換成 `MIDNIGHT`），大小寫不拘。冷門幣種可在 `src/crypto/news.js` 的 `COIN_NAMES` 補上說明，幫助 Codex 辨認。
+- 可寫代號或常見全名（例如 `Cardano` 會換成 `ADA`、`NIGHT` 會換成 `MIDNIGHT`），大小寫不拘。冷門幣種可在 `src/crypto/news.js` 的 `COIN_NAMES` 補上說明，幫助 AI 辨認。
 
-程式也會檢查 Codex 的回覆：
+程式也會檢查 AI 的回覆：
 - 缺少標題或網址不是 `http(s)` 的新聞會被捨棄；兩個分類重複的網址只保留一次。
 - 找不到足夠的新聞時，只發送實際找到的數量；兩個分類都沒有新聞時視為失敗，不刪除前一天的新聞。
 
-新聞由 Codex 搜尋與摘要，內容可能有誤，重要資訊請點擊卡片標題查看原文。
+新聞由 AI 搜尋與摘要，內容可能有誤，重要資訊請點擊卡片標題查看原文。
 
 ## Discord 發布內容
 
@@ -109,7 +109,7 @@ news: {
 
 發送順序固定為：
 
-1. 以 Codex 搜尋並整理新聞。**搜尋失敗時不刪除舊訊息**，頻道保留前一次的新聞。
+1. 以 AI 搜尋並整理新聞。**搜尋失敗時不刪除舊訊息**，頻道保留前一次的新聞。
 2. 刪除前一次發送的新聞訊息。訊息已被手動刪除（Discord 回傳 404）時略過；其他刪除失敗時**不發送今天的新聞**，等待重試。
 3. 發送今天的新聞，並記錄訊息 ID，供下一次刪除。
 
@@ -166,7 +166,7 @@ schedule: {
 | --- | --- |
 | 啟動或電腦睡眠喚醒時，今天的發送時間已過、但今天還沒發送 | 立即補發一次；只補當天，不補前幾天 |
 | 今天已發送過 | 重新啟動也不會重發，等到下一個排程日 |
-| 發送失敗（Codex、網路或 Discord 錯誤） | 30 分鐘後重試，同一天最多 3 次，之後等下一個排程日 |
+| 發送失敗（AI、網路或 Discord 錯誤） | 30 分鐘後重試，同一天最多 3 次，之後等下一個排程日 |
 
 是否已發送以紀錄檔判斷，因此停止後重新啟動、或先手動執行 `npm run crypto`，排程都不會在同一天重複發送。
 
@@ -200,7 +200,7 @@ webhooks: [
 運作方式：
 
 - 程式以網址中的 **Webhook ID** 區分每個 Webhook，不使用 `name`；欄位名稱寫錯（例如 `persona`）或網址重複時會直接報錯。
-- 新聞只用 Codex 搜尋一次，再依清單順序發送到每個 Webhook，費用與時間不會因 Webhook 變多而增加。
+- 新聞只用 AI 搜尋一次，再依清單順序發送到每個 Webhook，費用與時間不會因 Webhook 變多而增加。
 - 每個 Webhook 只能刪除自己發送的訊息，所以每日紀錄依 Webhook 分開：每個 Webhook 各自刪除自己前一天的新聞、各自記錄今天是否完成。
 - 某個 Webhook 失敗（例如被對方刪除）不影響其他 Webhook；全部完成才算今天已發送，重試時只處理尚未完成的 Webhook。
 - 修改清單後需重新啟動 `npm run crypto:schedule`。從清單移除的 Webhook，它最後一次發送的新聞不會被自動刪除。
@@ -246,7 +246,7 @@ webhooks: [
 - 記錄依 Webhook 存在 `data/crypto/webhook-profiles/<Webhook ID>.json`，與其他主題分開；即使和其他主題使用同一個 Webhook，也各自偵測、各自發送自己的提醒。
 - 有[多個 Webhook](#多個-webhook) 時，每個 Webhook 各自偵測，用自己的角色設定與提醒文字。
 - AI 只看新頭像，不比較新舊頭像；自訂頭像被移除時不附圖，會告訴 AI 已改回 Discord 預設頭像。
-- AI 感想使用共用的 Codex 設定（`CODEX_BIN`、`CODEX_MODEL`）與設定檔的 `codexTimeoutMs` 逾時設定，不開放網路搜尋；實測一次約 10 秒。
+- AI 感想使用共用的 AI 設定（`AI_PROVIDER` 與對應的執行檔、模型）與設定檔的 `aiTimeoutMs` 逾時設定，不開放網路搜尋；實測一次約 10 秒。
 - 查詢、AI 感想或發送失敗時不更新記錄，下次執行會再試；錯誤只記錄，不影響新聞的發送。
 - 提示詞需要換行時，在 JS 字串中以 `\n` 表示換行，或改用反引號（`` ` ``）包住多行文字。
 - 只能在程式執行時發現變更，也無法得知是誰更換的；預覽模式（`npm run crypto:preview`）不檢查。
@@ -256,7 +256,7 @@ webhooks: [
 
 Crypto 的所有設定集中在 `env/crypto.js`（範例見 [env/crypto.example.js](../env/crypto.example.js)），以 `export default` 匯出設定物件，可以直接寫註解；除了 `webhooks` 以外都是選填，未填寫時使用預設值。欄位名稱寫錯或型別不符時，程式會指出設定檔與欄位名稱並停止。
 
-共用的 Codex 設定（`CODEX_BIN`、`CODEX_MODEL`、`CODEX_API_KEY`）放在 `env/.env.shared`。系統環境變數不會覆寫 Crypto 設定；只有 `CRYPTO_CONFIG_FILE` 可用來改用其他設定檔。
+共用的 AI 設定（`AI_PROVIDER`、執行檔、模型、API key）放在 `env/.env.shared`，見[根目錄 README](../README.md#共用設定)。系統環境變數不會覆寫 Crypto 設定；只有 `CRYPTO_CONFIG_FILE` 可用來改用其他設定檔。
 
 | 欄位 | 預設值 | 用途 |
 | --- | --- | --- |
@@ -270,7 +270,7 @@ Crypto 的所有設定集中在 `env/crypto.js`（範例見 [env/crypto.example.
 | `news.priorityCoins` | `['BTC', 'ADA', 'ETH']` | 虛擬貨幣新聞的優先幣種，填寫順序即優先順序；也可寫成逗號分隔文字 |
 | `news.economyCount` | `3` | 美國經濟新聞篇數（1～10） |
 | `news.coinCount` | `3` | 虛擬貨幣新聞最多篇數（1～10） |
-| `codexTimeoutMs` | `600000`（10 分鐘） | Codex 搜尋與整理的逾時時間；網路搜尋較久，不使用共用的 `CODEX_TIMEOUT_MS` |
+| `aiTimeoutMs` | `600000`（10 分鐘） | AI 搜尋與整理的逾時時間；網路搜尋較久，不使用共用的 `AI_TIMEOUT_MS`。舊欄位名稱 `codexTimeoutMs` 仍可使用 |
 | `files.state` | `'data/crypto/state.json'` | 每日新聞紀錄（依 Webhook 分開） |
 | `files.discordMessages` | `'data/crypto/discord-messages.jsonl'` | 訊息操作紀錄 |
 
@@ -286,14 +286,14 @@ Crypto 的所有設定集中在 `env/crypto.js`（範例見 [env/crypto.example.
 | `CRYPTO_PERSONA_PROMPT`、`CRYPTO_AVATAR_CHANGED_MESSAGE`、`CRYPTO_NAME_CHANGED_MESSAGE` | 該 Webhook 的 `webhookProfile.personaPrompt`、`avatarMessage`、`nameMessage` |
 | `CRYPTO_SCHEDULE_DAYS`、`_TIME`、`_TIMEZONE` | `schedule.days`、`time`、`timeZone` |
 | `CRYPTO_PRIORITY_COINS`、`CRYPTO_ECONOMY_NEWS_COUNT`、`CRYPTO_COIN_NEWS_COUNT` | `news.priorityCoins`、`economyCount`、`coinCount` |
-| `CRYPTO_CODEX_TIMEOUT_MS` | `codexTimeoutMs` |
+| `CRYPTO_CODEX_TIMEOUT_MS` | `aiTimeoutMs` |
 | `CRYPTO_STATE_FILE`、`CRYPTO_DISCORD_MESSAGES_FILE` | `files.state`、`files.discordMessages` |
 
 舊版單一 Webhook 的每日紀錄（`data/crypto/state.json`）會在下次正式執行時自動轉成依 Webhook 分開的格式，仍能刪除前一天的新聞。
 
 ## 問題排查
 
-Node、Codex 與 Webhook 的共用問題，見[共用問題排查](../README.md#問題排查)。
+Node、AI CLI 與 Webhook 的共用問題，見[共用問題排查](../README.md#問題排查)。
 
 | 現象 | 處理方式 |
 | --- | --- |
@@ -302,7 +302,7 @@ Node、Codex 與 Webhook 的共用問題，見[共用問題排查](../README.md#
 | 「env/crypto.js 的 … 有不支援的欄位」、型別錯誤或「網址無效」 | 依錯誤訊息指出的欄位或第 N 個 Webhook 修正設定檔，欄位名稱見[設定參考](#設定參考) |
 | 手動發文顯示「設定了 N 個 Webhook，請用 --webhook-id 指定」 | 加上 `--webhook-id <ID>`，ID 可從 `list` 的 `webhookId` 查到 |
 | 執行後顯示「今天的新聞已發送過」 | 需要重新發送時使用 `npm run crypto -- --force` |
-| Codex 逾時 | 調高設定檔的 `codexTimeoutMs` |
+| AI 逾時 | 調高設定檔的 `aiTimeoutMs` |
 | 「刪除前一次的新聞訊息失敗，未發送今天的新聞」 | 確認 Webhook 沒有被更換或刪除；修正後執行 `npm run crypto` |
 | 更換 Webhook 後舊新聞沒有被刪除 | 新 Webhook 無法刪除舊 Webhook 的訊息，請在 Discord 手動刪除 |
 | 讀取狀態檔失敗，排程停止 | 紀錄檔損壞；確認內容或移除 `data/crypto/state.json` 後重新啟動（移除後前一次的新聞不會被自動刪除） |
@@ -342,4 +342,4 @@ data/crypto/
 | Webhook 清單讀取（共用） | `src/shared/targets.js` |
 | 專屬測試 | `test/crypto/` |
 
-共用 Discord、Codex 與排程工具的位置，見[共用專案結構](../README.md#專案結構)。
+共用 Discord、AI 與排程工具的位置，見[共用專案結構](../README.md#專案結構)。

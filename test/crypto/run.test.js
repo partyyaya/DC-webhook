@@ -53,7 +53,7 @@ process.stdin.on('end', () => {
   await writeFile(replyFile, JSON.stringify(NEWS));
   Object.assign(config, {
     targets, stateFile: path.join(dir, 'state.json'), discordMessagesFile: path.join(dir, 'posts.jsonl'),
-    codex: { bin, timeoutMs: 10_000, webSearch: true },
+    ai: { provider: 'codex', bin, timeoutMs: 10_000, webSearch: true },
     news: { economyCount: 3, coinCount: 3, priorityCoins: ['BTC', 'ADA', 'ETH'] },
     schedule: { ...original.schedule, timeZone: 'Asia/Taipei' },
   });

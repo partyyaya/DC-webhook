@@ -35,7 +35,7 @@ process.stdin.on('end', () => fs.writeFileSync(args[args.indexOf('--output-last-
   Object.assign(config, {
     newsCategories: Array.isArray(category) ? [...category] : [category], targets,
     stateFile: path.join(dir, 'state.json'), discordMessagesFile: path.join(dir, 'posts.jsonl'),
-    codex: { bin, timeoutMs: 10_000 },
+    ai: { provider: 'codex', bin, timeoutMs: 10_000 },
     schedule: { ...original.schedule, intervalMinutes: 60 },
   });
   t.mock.method(Date, 'now', () => Date.parse('2026-11-17T01:20:00Z'));
@@ -254,7 +254,7 @@ test('區間內沒有公告時 force 也不回退發舊公告、不呼叫摘要�
     { id: 'old', publishedAt: '2026.11.17 08:19' },
     { id: 'future', publishedAt: '2026.11.17 09:21' },
   ] } });
-  config.codex.bin = '/missing-codex';
+  config.ai.bin = '/missing-codex';
   assert.deepEqual(await runOnce({ force: true }), []);
   assert.equal(posts.length, 0);
   await assert.rejects(access(config.stateFile), { code: 'ENOENT' });

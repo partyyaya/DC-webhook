@@ -52,7 +52,7 @@ function buildHeaderEmbed(announcement, kind) {
     title: truncate(`${LABELS[kind] ?? '【公告】'}${announcement.title}`, TITLE_LIMIT),
     url: announcement.url,
     color: EMBED_COLOR,
-    footer: { text: '摘要由 Codex 自動產生，詳細內容請以官方公告為準' },
+    footer: { text: '摘要由 AI 自動產生，詳細內容請以官方公告為準' },
   };
 }
 
@@ -60,15 +60,15 @@ function buildHeaderEmbed(announcement, kind) {
  * 組出版本更新或維護公告的訊息：一張公告卡片，內文為文字摘要或維護時間。
  *
  * @param {object} announcement 公告資料（title、url、category、publishedAt、thumbnail）
- * @param {string} summary Codex 產生的摘要
+ * @param {string} summary AI 產生的摘要
  * @param {'new' | 'updated' | 'unchanged'} kind 比對結果，決定標題標籤
  * @param {{markUpdated?: boolean}} [options] markUpdated：公告更新時在內文最前面單獨加一行「（公告已更新）」
  * @returns {object} Discord Webhook 的請求內容
  */
 export function buildDiscordPayload(announcement, summary, kind, { markUpdated = false } = {}) {
-  // 公告內容被修改時由程式註明，不交給 Codex 判斷
+  // 公告內容被修改時由程式註明，不交給 AI 判斷
   const text = markUpdated && kind === 'updated' ? `（公告已更新）\n${summary}` : summary;
-  // 統一頂層項目間的空白，即使 Codex 未依格式輸出也保留一行間距。
+  // 統一頂層項目間的空白，即使 AI 未依格式輸出也保留一行間距。
   const spacedSummary = text.replace(/\r\n?/g, '\n').replace(/\n(?:[ \t]*\n)*(?=- )/g, '\n\n');
   const embed = {
     ...buildHeaderEmbed(announcement, kind),

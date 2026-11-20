@@ -12,7 +12,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { log, logError } from '../shared/log.js';
 import { dateKeyInZone, describeSchedule, formatInZone, latestRunTimeToday, nextRunTime } from '../shared/schedule.js';
 
-// 發送失敗後的重試間隔，以及同一天最多嘗試的次數（每次都會重新呼叫 Codex 搜尋）
+// 發送失敗後的重試間隔，以及同一天最多嘗試的次數（每次都會重新呼叫 AI 搜尋）
 const RETRY_MINUTES = 30;
 const MAX_ATTEMPTS_PER_DAY = 3;
 

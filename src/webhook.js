@@ -1,4 +1,4 @@
-/** 手動管理 Webhook 發文；不抓取公告、不呼叫 Codex、不變更公告去重紀錄。 */
+/** 手動管理 Webhook 發文；不抓取公告、不呼叫 AI、不變更公告去重紀錄。 */
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';

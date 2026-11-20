@@ -4,6 +4,7 @@
  */
 import path from 'node:path';
 import { MAX_NEWS_COUNT, parseCoins } from './news.js';
+import { aiSettingsFromEnv } from '../shared/ai.js';
 import { createSchedule } from '../shared/schedule.js';
 import { loadProjectEnv, ROOT_DIR } from '../shared/env.js';
 import { parseWebhookTargets } from '../shared/targets.js';
@@ -12,13 +13,15 @@ import { filePath, integer, listText, loadTopicConfig, section, text } from '../
 loadProjectEnv();
 
 const { file: configFile, label, values } = await loadTopicConfig('crypto');
-const settings = section(values, ['webhooks', 'schedule', 'news', 'codexTimeoutMs', 'files'], label);
+const settings = section(values, ['webhooks', 'schedule', 'news', 'aiTimeoutMs', 'codexTimeoutMs', 'files'], label);
 const at = (key) => `${label} 的 ${key}`;
 const schedule = section(settings.schedule, ['days', 'time', 'timeZone'], at('schedule'));
 const news = section(settings.news, ['priorityCoins', 'economyCount', 'coinCount'], at('news'));
 const files = section(settings.files, ['state', 'discordMessages'], at('files'));
 
 const scheduleTime = text(schedule.time, '08:00', at('schedule.time'));
+// AI 逾時時間：舊欄位名稱 codexTimeoutMs 仍可使用，aiTimeoutMs 優先
+const timeoutKey = settings.aiTimeoutMs === undefined && settings.codexTimeoutMs !== undefined ? 'codexTimeoutMs' : 'aiTimeoutMs';
 
 export const config = {
   // 設定檔位置（不存在時為 null，全部使用預設值且沒有 Webhook）
@@ -45,11 +48,11 @@ export const config = {
   },
   // 呼叫 Discord 時，每個 HTTP 請求的逾時時間
   httpTimeoutMs: 30_000,
-  // Codex CLI：執行檔與模型為共用設定（env/.env.shared）；需要網路搜尋，逾時時間在主題設定檔另外設定
-  codex: {
-    bin: process.env.CODEX_BIN || 'codex',
-    model: process.env.CODEX_MODEL || '',
-    timeoutMs: integer(settings.codexTimeoutMs, 10 * 60 * 1000, at('codexTimeoutMs')),
+  // AI 摘要：使用的 AI（Codex 或 Claude）、執行檔與模型為共用設定（env/.env.shared）；
+  // 需要網路搜尋，逾時時間在主題設定檔另外設定
+  ai: {
+    ...aiSettingsFromEnv(),
+    timeoutMs: integer(settings[timeoutKey], 10 * 60 * 1000, at(timeoutKey)),
     webSearch: true,
   },
   // npm run crypto:schedule 常駐模式的排程：預設每天 08:00 發送一次（台灣時間）

@@ -1,7 +1,7 @@
 /**
- * Crypto 新聞規則：組出給 Codex 的搜尋提示詞與輸出 JSON Schema，並檢查、整理 Codex 的回覆。
+ * Crypto 新聞規則：組出給 AI 的搜尋提示詞與輸出 JSON Schema，並檢查、整理 AI 的回覆。
  *
- * 每天請 Codex 以即時網路搜尋，找出發送前 24 小時內的：
+ * 每天請 AI 以即時網路搜尋，找出發送前 24 小時內的：
  *   - economy：美國經濟新聞，最重要的 N 則（設定檔 news.economyCount，預設 3）
  *   - crypto：虛擬貨幣新聞，最多 N 則（設定檔 news.coinCount，預設 3）；
  *     news.priorityCoins 的每個幣種至少 1 則（預設 BTC → ADA → ETH），選該幣種最重要的新聞；
@@ -13,14 +13,14 @@ import { formatInZone } from '../shared/schedule.js';
 // 每類新聞最多篇數：每個分類發成一則 Discord 訊息，一則訊息最多 10 張卡片
 export const MAX_NEWS_COUNT = 10;
 
-// 常見幣種的中文或全名，寫進提示詞幫助 Codex 辨識；不在表內的幣種只寫代號
+// 常見幣種的中文或全名，寫進提示詞幫助 AI 辨識；不在表內的幣種只寫代號
 const COIN_NAMES = {
   BTC: '比特幣', ETH: '以太坊', ADA: 'Cardano', SOL: 'Solana', XRP: 'XRP', DOGE: '狗狗幣', BNB: 'BNB',
   DOT: 'Polkadot', AVAX: 'Avalanche', LINK: 'Chainlink', LTC: '萊特幣', TRX: 'TRON', USDT: '泰達幣', USDC: 'USD Coin',
   SNEK: 'Cardano 生態迷因幣 Snek', MIDNIGHT: 'Midnight Network，Cardano 的隱私夥伴鏈，代幣 NIGHT',
 };
 
-// 幣種全名換成代號：設定檔或 Codex 回覆寫全名時，才能正確判斷優先順序
+// 幣種全名換成代號：設定檔或 AI 回覆寫全名時，才能正確判斷優先順序
 const COIN_ALIASES = {
   BITCOIN: 'BTC', ETHEREUM: 'ETH', ETHER: 'ETH', CARDANO: 'ADA', SOLANA: 'SOL', RIPPLE: 'XRP',
   DOGECOIN: 'DOGE', POLKADOT: 'DOT', AVALANCHE: 'AVAX', CHAINLINK: 'LINK', LITECOIN: 'LTC', TETHER: 'USDT',
@@ -61,7 +61,7 @@ const newsItem = (extra = {}) => {
   return { type: 'object', properties, required: Object.keys(properties), additionalProperties: false };
 };
 
-// 新聞資料的 JSON 格式（JSON Schema），透過 --output-schema 要求 Codex 的回覆必須符合
+// 新聞資料的 JSON 格式（JSON Schema），要求 AI 的回覆必須符合
 export const NEWS_SCHEMA = {
   type: 'object',
   properties: {
@@ -73,7 +73,7 @@ export const NEWS_SCHEMA = {
 };
 
 /**
- * 組出要交給 Codex 的搜尋提示詞。
+ * 組出要交給 AI 的搜尋提示詞。
  *
  * @param {object} options
  * @param {Date} options.from 新聞發布時間範圍的開始
@@ -144,16 +144,16 @@ function cryptoRules(coinCount, priorityCoins) {
 }
 
 /**
- * 解析並檢查 Codex 回覆的新聞 JSON。
+ * 解析並檢查 AI 回覆的新聞 JSON。
  *   - 缺少標題或網址不是 http(s) 的新聞直接捨棄；兩個分類中重複的網址只保留第一次出現。
  *   - 虛擬貨幣新聞依 priorityCoins 的順序排列（同時涉及多個幣種時，以最優先的幣種計算），
- *     不涉及優先幣種的新聞排在最後；同一順位維持 Codex 的重要性順序。
+ *     不涉及優先幣種的新聞排在最後；同一順位維持 AI 的重要性順序。
  *   - 先依幣種順序，替每個優先幣種選 1 則（以該幣種為代表幣種、排最前面的新聞；沒有時改選有提到該幣種的新聞），
  *     篇數用完就停止，所以篇數少於幣種數量時只會選到前面的幣種。
- *   - 還有名額時，再依排列順序補上 Codex 回覆的其他新聞（Codex 只會在剩餘名額放重要新聞）。
+ *   - 還有名額時，再依排列順序補上 AI 回覆的其他新聞（AI 只會在剩餘名額放重要新聞）。
  *   - 兩個分類都沒有任何新聞時拋錯，讓這次不刪除前一次的新聞、也不發送。
  *
- * @param {string} text Codex 的回覆
+ * @param {string} text AI 的回覆
  * @param {{economyCount: number, coinCount: number, priorityCoins: string[]}} options 篇數與優先幣種
  * @returns {{economy: object[], crypto: object[]}}
  */
@@ -162,10 +162,10 @@ export function parseNews(text, { economyCount, coinCount, priorityCoins }) {
   try {
     data = JSON.parse(text);
   } catch {
-    throw new Error('Codex 回覆的新聞資料不是有效的 JSON');
+    throw new Error('AI 回覆的新聞資料不是有效的 JSON');
   }
   if (!data || !Array.isArray(data.economy) || !Array.isArray(data.crypto)) {
-    throw new Error('Codex 回覆的新聞資料格式不符');
+    throw new Error('AI 回覆的新聞資料格式不符');
   }
 
   const seenUrls = new Set();
@@ -200,7 +200,7 @@ export function parseNews(text, { economyCount, coinCount, priorityCoins }) {
   const crypto = sorted.filter((item) => picked.has(item));
 
   if (economy.length === 0 && crypto.length === 0) {
-    throw new Error('Codex 沒有找到任何符合時間範圍的新聞');
+    throw new Error('AI 沒有找到任何符合時間範圍的新聞');
   }
   return { economy, crypto };
 }
@@ -209,7 +209,7 @@ export function parseNews(text, { economyCount, coinCount, priorityCoins }) {
  * 整理單則新聞：去除多餘空白並限制長度；標題為空或網址無效時回傳 null。
  * 長度上限確保一則訊息放滿 10 張卡片時，文字總量仍在 Discord 的 6000 字限制內。
  *
- * @param {object} item Codex 回覆的單則新聞
+ * @param {object} item AI 回覆的單則新聞
  * @param {boolean} withCoins 是否整理 coins 欄位（虛擬貨幣新聞）
  * @returns {object | null}
  */

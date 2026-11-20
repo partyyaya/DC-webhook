@@ -10,6 +10,10 @@ import { promisify } from 'node:util';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const hook = (id) => `https://discord.com/api/webhooks/${id}/token${id}`;
+// 子程序載入設定時清空 AI 相關的環境變數，避免本機 env/.env.shared 的設定影響預設值（已設定的空值優先於共用檔）
+const NEUTRAL_AI_ENV = {
+  AI_PROVIDER: '', AI_TIMEOUT_MS: '', CODEX_TIMEOUT_MS: '', CODEX_BIN: '', CODEX_MODEL: '', CLAUDE_BIN: '', CLAUDE_MODEL: '',
+};
 
 // ---- 共用環境檔 env/.env.shared ----
 
@@ -49,8 +53,9 @@ test('無法讀取共用環境檔時明確失敗', async (t) => {
 /**
  * 在子程序中以指定的設定檔內容載入主題設定，回傳摘要。
  * content 為設定物件（轉成 export default）或原始 JS 文字；null 代表設定檔不存在。
+ * aiOnly 為 true 時只回傳 AI 設定（provider、bin、model、timeoutMs）。
  */
-async function readConfig(t, source, content, { cwd = ROOT, env = {} } = {}) {
+async function readConfig(t, source, content, { cwd = ROOT, env = {}, aiOnly = false } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'dcwebhook-topic-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const file = path.join(dir, `${source}.js`);
@@ -62,16 +67,18 @@ try {
     targets: config.targets.map(({ name, webhookId, webhookProfile }) => ({ name, webhookId, webhookProfile })),
     state: config.stateFile, posts: config.discordMessagesFile,
     days: [...config.schedule.days].sort(), start: config.schedule.start, end: config.schedule.end,
-    interval: config.schedule.intervalMinutes, timeZone: config.schedule.timeZone, timeout: config.codex.timeoutMs,
+    interval: config.schedule.intervalMinutes, timeZone: config.schedule.timeZone, timeout: config.ai.timeoutMs,
     ...(config.newsCategories ? { categories: config.newsCategories } : {}),
-    ...(config.news ? { news: config.news, webSearch: config.codex.webSearch } : {}),
+    ...(config.news ? { news: config.news, webSearch: config.ai.webSearch } : {}),
+    ai: { provider: config.ai.provider, bin: config.ai.bin, model: config.ai.model, timeoutMs: config.ai.timeoutMs },
   }));
 } catch (err) { console.error(err.message); process.exitCode = 1; }
 `;
   const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', script], {
-    cwd, env: { ...process.env, CODEX_TIMEOUT_MS: '', [`${source.toUpperCase()}_CONFIG_FILE`]: file, ...env },
+    cwd, env: { ...process.env, ...NEUTRAL_AI_ENV, [`${source.toUpperCase()}_CONFIG_FILE`]: file, ...env },
   });
-  return JSON.parse(stdout);
+  const { ai, ...summary } = JSON.parse(stdout);
+  return aiOnly ? ai : summary;
 }
 
 const profileFile = (source, id) => path.join(ROOT, `data/${source}/webhook-profiles/${id}.json`);
@@ -147,7 +154,7 @@ export default {
   ],
   schedule: { days: '1-5', time: '21:30', timeZone: 'UTC' },
   news: { priorityCoins: ['eth', ' sol', 'Cardano'], economyCount: 1, coinCount: 10 },
-  codexTimeoutMs: 120000,
+  aiTimeoutMs: 120000,
   files: { state: 'data/crypto/custom-state.json', discordMessages: 'data/crypto/custom-posts.jsonl' },
 };`);
   assert.deepEqual(config, {
@@ -167,6 +174,7 @@ test('Crypto 設定錯誤明確指出設定檔與欄位名稱', async (t) => {
     [{ schedule: { days: 'x' } }, 'schedule.days'],
     [{ schedule: { time: '8點' } }, 'schedule.time'],
     [{ schedule: { timeZone: 'Mars/Base' } }, 'schedule.timeZone'],
+    [{ aiTimeoutMs: 'x' }, 'aiTimeoutMs'],
     [{ codexTimeoutMs: 'x' }, 'codexTimeoutMs'],
     [{ news: { economyCount: 0 } }, 'news.economyCount'],
     [{ news: { coinCount: 11 } }, 'news.coinCount'],
@@ -182,4 +190,31 @@ test('Crypto 設定錯誤明確指出設定檔與欄位名稱', async (t) => {
       return true;
     });
   }
+});
+
+// ---- AI 設定（env/.env.shared 的 AI_PROVIDER 等共用設定）----
+
+test('預設使用 Codex；AI_PROVIDER=claude 時改用 CLAUDE_BIN、CLAUDE_MODEL，AI_TIMEOUT_MS 優先於舊的 CODEX_TIMEOUT_MS', async (t) => {
+  assert.deepEqual(await readConfig(t, 'artale', {}, { aiOnly: true }), { provider: 'codex', bin: 'codex', model: '', timeoutMs: 300000 });
+  const both = { CODEX_BIN: 'my-codex', CODEX_MODEL: 'gpt-test', CLAUDE_BIN: '/opt/claude', CLAUDE_MODEL: 'sonnet', CODEX_TIMEOUT_MS: '2000' };
+  assert.deepEqual(await readConfig(t, 'artale', {}, { aiOnly: true, env: both }),
+    { provider: 'codex', bin: 'my-codex', model: 'gpt-test', timeoutMs: 2000 });
+  assert.deepEqual(await readConfig(t, 'artale', {}, { aiOnly: true, env: { ...both, AI_PROVIDER: ' Claude ', AI_TIMEOUT_MS: '1000' } }),
+    { provider: 'claude', bin: '/opt/claude', model: 'sonnet', timeoutMs: 1000 });
+  assert.deepEqual(await readConfig(t, 'crypto', {}, { aiOnly: true, env: { AI_PROVIDER: 'claude' } }),
+    { provider: 'claude', bin: 'claude', model: '', timeoutMs: 600000 });
+});
+
+test('AI_PROVIDER 名稱錯誤時明確失敗', async (t) => {
+  for (const source of ['artale', 'crypto']) {
+    await assert.rejects(readConfig(t, source, {}, { env: { AI_PROVIDER: 'gemini' } }), (err) => {
+      assert.ok(err.stderr.includes('AI_PROVIDER 只能是 codex 或 claude，目前為「gemini」'), err.stderr);
+      return true;
+    });
+  }
+});
+
+test('Crypto 逾時時間使用 aiTimeoutMs，舊欄位 codexTimeoutMs 仍可使用', async (t) => {
+  assert.equal((await readConfig(t, 'crypto', { codexTimeoutMs: 1000 })).timeout, 1000);
+  assert.equal((await readConfig(t, 'crypto', { aiTimeoutMs: 2000, codexTimeoutMs: 1000 })).timeout, 2000);
 });

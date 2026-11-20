@@ -68,13 +68,13 @@ syncBuiltinESMExports();
     webhooks: [{ url: 'https://discord.com/api/webhooks/555/testToken' }],
     schedule: { days: '1-7', time: '08:00', timeZone: 'Asia/Taipei' },
     news: { priorityCoins: ['BTC', 'ADA', 'ETH'], economyCount: 3, coinCount: 3 },
-    codexTimeoutMs: 10000,
+    aiTimeoutMs: 10000,
     files: { state: stateFile, discordMessages: path.join(dir, 'posts.jsonl') },
   })};`);
   const { stdout } = await promisify(execFile)(process.execPath, ['--import', preload,
     fileURLToPath(new URL('../../src/crypto/scheduler.js', import.meta.url))], {
     timeout: 20_000,
-    env: { ...process.env, CODEX_BIN: bin, CRYPTO_CONFIG_FILE: configFile },
+    env: { ...process.env, AI_PROVIDER: 'codex', CODEX_BIN: bin, CRYPTO_CONFIG_FILE: configFile },
   });
   const { calls } = JSON.parse(stdout.match(/ENTRY_RESULT=(.+)/)[1]);
   return { calls, stdout };

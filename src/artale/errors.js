@@ -10,7 +10,7 @@
  *   - 這次執行不會發送任何訊息到 Discord，直接結束（結束碼 2）
  *   - npm run artale:schedule 的常駐排程也會停止，不再繼續輪詢
  *
- * 網路逾時、Codex 或 Discord 暫時失敗等「可能自己恢復」的錯誤不屬於這一類，
+ * 網路逾時、AI 或 Discord 暫時失敗等「可能自己恢復」的錯誤不屬於這一類，
  * 那些錯誤不中止排程；後續仍依每輪的時間範圍檢查。
  */
 export class ContentParseError extends Error {

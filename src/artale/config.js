@@ -4,6 +4,7 @@
  */
 import path from 'node:path';
 import { parseCategories } from './client.js';
+import { aiSettingsFromEnv } from '../shared/ai.js';
 import { createSchedule } from '../shared/schedule.js';
 import { loadProjectEnv, positiveIntFromEnv, ROOT_DIR } from '../shared/env.js';
 import { parseWebhookTargets } from '../shared/targets.js';
@@ -42,11 +43,11 @@ export const config = {
   discordMessagesFile: filePath(files.discordMessages, 'data/artale/discord-messages.jsonl', at('files.discordMessages')),
   // 抓官網與呼叫 Discord 時，每個 HTTP 請求的逾時時間
   httpTimeoutMs: 30_000,
-  // Codex CLI：執行檔、模型與摘要逾時時間為共用設定（env/.env.shared）
-  codex: {
-    bin: process.env.CODEX_BIN || 'codex',
-    model: process.env.CODEX_MODEL || '',
-    timeoutMs: positiveIntFromEnv('CODEX_TIMEOUT_MS', 5 * 60 * 1000),
+  // AI 摘要：使用的 AI（Codex 或 Claude）、執行檔、模型與摘要逾時時間為共用設定（env/.env.shared）；
+  // 舊的 CODEX_TIMEOUT_MS 仍可使用，AI_TIMEOUT_MS 優先
+  ai: {
+    ...aiSettingsFromEnv(),
+    timeoutMs: positiveIntFromEnv('AI_TIMEOUT_MS', positiveIntFromEnv('CODEX_TIMEOUT_MS', 5 * 60 * 1000)),
   },
   // npm run artale:schedule 常駐模式的排程：預設每週二 08:20～17:20，每 60 分鐘檢查一次（台灣時間）
   schedule: createSchedule({

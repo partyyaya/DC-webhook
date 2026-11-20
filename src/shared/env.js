@@ -9,7 +9,7 @@ export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)
 export const SOURCES = ['artale', 'crypto'];
 
 /**
- * 載入共用環境檔 env/.env.shared（Codex 執行檔、模型、API key 等所有主題共用的設定）。
+ * 載入共用環境檔 env/.env.shared（使用的 AI、CLI 執行檔、模型、API key 等所有主題共用的設定）。
  * 系統環境變數優先，包含已設定的空值。各主題的設定不放在這裡，以主題前綴開頭的變數會被忽略。
  */
 export function loadProjectEnv({ rootDir = ROOT_DIR, env = process.env } = {}) {

@@ -1,4 +1,4 @@
-/** Artale 專用的手動發文入口；不載入公告、排程或 Codex 設定。 */
+/** Artale 專用的手動發文入口；不載入公告、排程或 AI 設定。 */
 import { runWebhookCommand } from '../webhook.js';
 
 try {

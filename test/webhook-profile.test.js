@@ -49,7 +49,7 @@ process.stdin.setEncoding('utf8').on('data', (chunk) => (input += chunk)).on('en
   await writeFile(replyFile, JSON.stringify({ avatar: '新頭像好可愛喵', name: '新名字還不錯喵' }));
   const options = {
     ...MESSAGES, historyFile: path.join(dir, 'posts.jsonl'), profileFile: path.join(dir, 'artale', 'webhook-profile.json'),
-    codex: { bin, timeoutMs: 10_000, webSearch: true },
+    ai: { provider: 'codex', bin, timeoutMs: 10_000, webSearch: true },
   };
   const posts = () => calls.filter((call) => call.method === 'POST');
   const sent = async () => (await readFile(options.historyFile, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));

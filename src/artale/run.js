@@ -10,7 +10,7 @@
  *   第二階段：依分類順序與發布時間逐篇執行
  *     1. 計算雜湊值並與紀錄比對        （state.js）
  *     2. 沒有變化就跳過該篇公告
- *     3. 有變化才呼叫 Codex 產生摘要    （summarize.js）
+ *     3. 有變化才呼叫 AI 產生摘要       （summarize.js）
  *     4. 發送到 Discord Webhook         （../shared/posts.js）
  *     5. 記錄已發送的公告版本          （state.js）
  *
@@ -32,7 +32,7 @@ import {
   previewShopSummary,
   SHOP_SCHEMA,
 } from './summarize.js';
-import { summarizeWithCodex } from '../shared/codex.js';
+import { aiLabel, summarizeWithAi } from '../shared/ai.js';
 import { checkWebhookProfile } from '../shared/webhook-profile.js';
 import { describeTarget } from '../shared/targets.js';
 
@@ -88,7 +88,7 @@ export async function runOnce({ dryRun = false, force = false, startup = false, 
   if (!dryRun) {
     for (const target of config.targets) {
       await checkWebhookProfile(target.url, {
-        ...target.webhookProfile, codex: config.codex, historyFile: config.discordMessagesFile,
+        ...target.webhookProfile, ai: config.ai, historyFile: config.discordMessagesFile,
         requestOptions: { timeoutMs: config.httpTimeoutMs },
       });
     }
@@ -179,7 +179,7 @@ export async function runOnce({ dryRun = false, force = false, startup = false, 
 
 /**
  * 處理已抓到的單篇公告：每個 Webhook 各自比對 → 有變化的 Webhook 才摘要、發送並記錄。
- * 每篇公告只呼叫一次 Codex 產生摘要，所有 Webhook 共用；標題標籤與「（公告已更新）」由程式依各 Webhook 的比對結果加上。
+ * 每篇公告只呼叫一次 AI 產生摘要，所有 Webhook 共用；標題標籤與「（公告已更新）」由程式依各 Webhook 的比對結果加上。
  * 某個 Webhook 發送失敗不影響其他 Webhook，失敗的 Webhook 不記錄此版本，之後仍在檢查範圍內時再補發。
  *
  * @param {{category: string, label: string, announcement: object}} item 第一階段抓到的資料
@@ -207,7 +207,7 @@ async function notifyIfChanged({ category, label, announcement }, state, { dryRu
     return { category, status: 'unchanged', state, announcement };
   }
 
-  // 步驟 3：呼叫一次 Codex 產生摘要，所有 Webhook 共用；再依各 Webhook 的比對結果分組排版
+  // 步驟 3：呼叫一次 AI 產生摘要，所有 Webhook 共用；再依各 Webhook 的比對結果分組排版
   // （標題標籤與「（公告已更新）」由程式加上），商城可能有多則訊息
   const groups = new Map();
   for (const { target, change } of pending) {
@@ -263,12 +263,12 @@ async function notifyIfChanged({ category, label, announcement }, state, { dryRu
 }
 
 /**
- * 呼叫 Codex 產生摘要。
- *   - 購物商場（bm）：要求 Codex 回覆 SHOP_SCHEMA 格式的 JSON，解析後回傳商品資料。
- *   - 維護（maintenance）：要求 Codex 回覆 MAINTENANCE_SCHEMA，僅組成維護時間內文。
- *   - 其他分類：回傳 Codex 寫好的文字摘要。
- * 正式模式下 Codex 失敗（或回覆格式不符）就直接拋錯（不發送、不記錄）；
- * 預覽模式下則改用預覽內容代替，讓還沒安裝 Codex 時也能看到訊息長相。
+ * 呼叫設定的 AI（Codex 或 Claude）產生摘要。
+ *   - 購物商場（bm）：要求 AI 回覆 SHOP_SCHEMA 格式的 JSON，解析後回傳商品資料。
+ *   - 維護（maintenance）：要求 AI 回覆 MAINTENANCE_SCHEMA，僅組成維護時間內文。
+ *   - 其他分類：回傳 AI 寫好的文字摘要。
+ * 正式模式下 AI 失敗（或回覆格式不符）就直接拋錯（不發送、不記錄）；
+ * 預覽模式下則改用預覽內容代替，讓還沒安裝 AI CLI 時也能看到訊息長相。
  *
  * @param {object} announcement 公告資料（含標題、內文等）
  * @param {string} category 分類代碼，決定使用購物商場、維護時間或版本更新格式
@@ -282,21 +282,21 @@ async function summarize(announcement, category, dryRun, say) {
   const prompt = buildSummaryPrompt(announcement, category);
   try {
     if (isMaintenance) {
-      const reply = await summarizeWithCodex(prompt, { ...config.codex, schema: MAINTENANCE_SCHEMA });
+      const reply = await summarizeWithAi(prompt, { ...config.ai, schema: MAINTENANCE_SCHEMA });
       return parseMaintenanceSummary(reply);
     }
     if (isShop) {
-      const reply = await summarizeWithCodex(prompt, { ...config.codex, schema: SHOP_SCHEMA });
+      const reply = await summarizeWithAi(prompt, { ...config.ai, schema: SHOP_SCHEMA });
       return parseShopSummary(reply, announcement.content);
     }
-    return await summarizeWithCodex(prompt, config.codex);
+    return await summarizeWithAi(prompt, config.ai);
   } catch (err) {
     if (!dryRun) throw err;
-    say(`Codex 摘要失敗，--dry-run 改用預覽內容代替：${err.message}`);
+    say(`${aiLabel(config.ai.provider)} 摘要失敗，--dry-run 改用預覽內容代替：${err.message}`);
     // 維護預覽失敗時也不能回退成公告全文，以免混入時間以外的內容。
     if (isMaintenance) return '維護時間：尚未取得（預覽模式）';
     return isShop
       ? previewShopSummary(announcement.content)
-      : `（Codex 摘要失敗，以下為公告開頭內容）\n\n${announcement.content.slice(0, 1500)}`;
+      : `（AI 摘要失敗，以下為公告開頭內容）\n\n${announcement.content.slice(0, 1500)}`;
   }
 }

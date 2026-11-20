@@ -3,7 +3,7 @@
  *
  * 轉出來的文字有兩個用途：
  *   1. 計算內容雜湊值，判斷公告是否有變化（state.js）
- *   2. 當作提示詞的一部分交給 Codex 產生摘要（summarize.js）
+ *   2. 當作提示詞的一部分交給 AI 產生摘要（summarize.js）
  *
  * Lexical 的文件是一棵樹，每個節點都有 type，例如：
  *   - 區塊節點：paragraph（段落）、heading（標題）、quote（引用）、list / listitem（清單）、

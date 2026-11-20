@@ -4,7 +4,7 @@
 //
 // 這是 JS 檔，可以直接寫註解。除了 webhooks 以外都是選填，刪掉或不寫就使用預設值（即下方填的值）。
 // 修改後需重新啟動 npm run crypto:schedule 才會生效。
-// 共用的 Codex 設定（執行檔、模型、API key）放在 env/.env.shared。
+// 共用的 AI 設定（使用 Codex 或 Claude、執行檔、模型、API key）放在 env/.env.shared。
 
 export default {
   // ---- Discord Webhook ----
@@ -51,8 +51,8 @@ export default {
     coinCount: 3, // 虛擬貨幣新聞最多篇數（1～10）
   },
 
-  // Codex 網路搜尋與整理新聞的逾時時間（毫秒）
-  codexTimeoutMs: 600000,
+  // AI 網路搜尋與整理新聞的逾時時間（毫秒）；舊欄位名稱 codexTimeoutMs 仍可使用
+  aiTimeoutMs: 600000,
 
   // ---- 紀錄檔位置（相對路徑以專案根目錄為準）----
   files: {

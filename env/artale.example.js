@@ -4,7 +4,7 @@
 //
 // 這是 JS 檔，可以直接寫註解。除了 webhooks 以外都是選填，刪掉或不寫就使用預設值（即下方填的值）。
 // 修改後需重新啟動 npm run artale:schedule 才會生效。
-// 共用的 Codex 設定（執行檔、模型、API key、摘要逾時）放在 env/.env.shared。
+// 共用的 AI 設定（使用 Codex 或 Claude、執行檔、模型、API key、摘要逾時）放在 env/.env.shared。
 
 export default {
   // ---- Discord Webhook ----

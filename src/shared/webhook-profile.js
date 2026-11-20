@@ -3,7 +3,7 @@
  * 被更換時發送提醒，並更新記錄。
  *
  *   - 提醒內容依各主題的設定決定：
- *       有角色設定提示詞 → 由 Codex 以角色口吻看新頭像與新名稱寫感想（取代固定文字）
+ *       有角色設定提示詞 → 由 AI 以角色口吻看新頭像與新名稱寫感想（取代固定文字）
  *       沒有提示詞       → 直接發送設定的固定文字（可使用 {name}、{oldName}）
  *       提示詞與兩句文字都沒有設定（預設） → 不查詢、不發送
  *   - 第一行為頭像、第二行為名稱；只變更其中一項時只發送該行。
@@ -15,7 +15,7 @@
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { summarizeWithCodex } from './codex.js';
+import { summarizeWithAi } from './ai.js';
 import { getWebhookProfile } from './discord.js';
 import { log, logError } from './log.js';
 import { managePost } from './posts.js';
@@ -36,14 +36,14 @@ export const REACTION_SCHEMA = {
  * @param {string} [options.personaPrompt] 角色設定提示詞；有設定時由 AI 寫感想，取代固定文字
  * @param {string} [options.avatarMessage] 沒有提示詞時，頭像變更要發送的文字；空字串代表不發送
  * @param {string} [options.nameMessage] 沒有提示詞時，名稱變更要發送的文字；空字串代表不發送
- * @param {object} [options.codex] Codex CLI 設定（bin、model、timeoutMs），AI 感想使用
+ * @param {object} [options.ai] AI 設定（provider、bin、model、timeoutMs），AI 感想使用
  * @param {string} options.profileFile 此主題的名稱與頭像記錄檔
  * @param {string} options.historyFile 發文紀錄檔
  * @param {object} [options.requestOptions] Discord 請求選項（逾時時間等）
  * @returns {Promise<{status: 'disabled' | 'recorded' | 'unchanged' | 'changed' | 'failed', avatarChanged?: boolean, nameChanged?: boolean, content?: string}>}
  */
 export async function checkWebhookProfile(webhookUrl, {
-  personaPrompt = '', avatarMessage = '', nameMessage = '', codex, profileFile, historyFile, requestOptions = {},
+  personaPrompt = '', avatarMessage = '', nameMessage = '', ai, profileFile, historyFile, requestOptions = {},
 }) {
   if (!personaPrompt && !avatarMessage && !nameMessage) return { status: 'disabled' };
   try {
@@ -67,7 +67,7 @@ export async function checkWebhookProfile(webhookUrl, {
 
     // 有角色設定時由 AI 寫感想，否則使用固定文字；第一行頭像、第二行名稱
     const lines = personaPrompt
-      ? await reactWithAi({ personaPrompt, codex, current, previous, avatarChanged, nameChanged, requestOptions })
+      ? await reactWithAi({ personaPrompt, ai, current, previous, avatarChanged, nameChanged, requestOptions })
       : fixedLines({ avatarMessage, nameMessage, current, previous, avatarChanged, nameChanged });
     const content = lines.join('\n');
 
@@ -97,16 +97,16 @@ function fixedLines({ avatarMessage, nameMessage, current, previous, avatarChang
 }
 
 /**
- * 由 Codex 以角色口吻寫感想：頭像被更換時附上新頭像圖片，名稱被更換時提供新舊名稱。
+ * 由 AI 以角色口吻寫感想：頭像被更換時附上新頭像圖片，名稱被更換時提供新舊名稱。
  * 被更換的項目沒有寫出感想時視為失敗，不發送也不更新記錄，下次再試。
  *
  * @returns {Promise<string[]>} 依序為頭像、名稱的感想（只包含被更換的項目）
  */
-async function reactWithAi({ personaPrompt, codex, current, previous, avatarChanged, nameChanged, requestOptions }) {
-  if (!codex?.bin) throw new Error('未提供 Codex CLI 設定，無法產生 AI 感想');
+async function reactWithAi({ personaPrompt, ai, current, previous, avatarChanged, nameChanged, requestOptions }) {
+  if (!ai?.bin) throw new Error('未提供 AI CLI 設定，無法產生 AI 感想');
   const dir = await mkdtemp(path.join(os.tmpdir(), 'dcwebhook-avatar-'));
   try {
-    // 新頭像有自訂圖片時下載下來附給 Codex；被移除（改回 Discord 預設頭像）時不附圖
+    // 新頭像有自訂圖片時下載下來附給 AI；被移除（改回 Discord 預設頭像）時不附圖
     const images = [];
     if (avatarChanged && current.avatar) {
       const file = path.join(dir, 'avatar.png');
@@ -114,14 +114,14 @@ async function reactWithAi({ personaPrompt, codex, current, previous, avatarChan
       images.push(file);
     }
     const prompt = buildReactionPrompt({ personaPrompt, current, previous, avatarChanged, nameChanged });
-    const reply = await summarizeWithCodex(prompt, { ...codex, webSearch: false, schema: REACTION_SCHEMA, images });
+    const reply = await summarizeWithAi(prompt, { ...ai, webSearch: false, schema: REACTION_SCHEMA, images });
     let data;
-    try { data = JSON.parse(reply); } catch { throw new Error('Codex 回覆的感想不是有效的 JSON'); }
+    try { data = JSON.parse(reply); } catch { throw new Error('AI 回覆的感想不是有效的 JSON'); }
     const clean = (value) => (typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, 500) : '');
     const lines = [];
     if (avatarChanged) lines.push(clean(data?.avatar));
     if (nameChanged) lines.push(clean(data?.name));
-    if (lines.some((line) => !line)) throw new Error('Codex 沒有寫出被更換項目的感想');
+    if (lines.some((line) => !line)) throw new Error('AI 沒有寫出被更換項目的感想');
     log(`AI 感想：${lines.join(' / ')}`);
     return lines;
   } finally {

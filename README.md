@@ -1,6 +1,6 @@
 # Discord 通知工具
 
-提供共用的 Discord Webhook 發文管理、Codex 摘要執行器、排程時間計算與訊息操作紀錄。各主題的公告來源、設定、指令與規則放在各自的文件中。
+提供共用的 Discord Webhook 發文管理、AI 摘要執行器（Codex 或 Claude）、排程時間計算與訊息操作紀錄。各主題的公告來源、設定、指令與規則放在各自的文件中。
 
 **主題文件：[Artale 通知](docs/artale.md) · [Crypto 每日新聞](docs/crypto.md)**
 
@@ -17,19 +17,25 @@
 
 ## 環境設置
 
-需要 Node.js 20.12 以上，專案使用 Node 22，沒有 npm 套件依賴。自動產生摘要時需要 Codex CLI；只使用手動 Webhook 工具時不需要 Codex。
+需要 Node.js 20.12 以上，專案使用 Node 22，沒有 npm 套件依賴。自動產生摘要時需要 Codex CLI 或 Claude Code CLI 其中一個（由 `AI_PROVIDER` 選擇，預設 Codex）；只使用手動 Webhook 工具時都不需要。
 
-### Node.js 與 Codex CLI
+### Node.js 與 AI CLI
 
-先切換至專案根目錄，再執行：
+先切換至專案根目錄，再安裝要使用的 AI CLI：
 
 ```bash
 nvm use
+
+# 使用 Codex（預設）
 npm install -g @openai/codex
 codex login
+
+# 或使用 Claude
+npm install -g @anthropic-ai/claude-code
+claude auth login
 ```
 
-`nvm use` 依 [.nvmrc](.nvmrc) 切換至 Node 22。Codex 可使用 ChatGPT 帳號登入，也可透過 API key 驗證，見[共用設定](#共用設定)。
+`nvm use` 依 [.nvmrc](.nvmrc) 切換至 Node 22。Codex 可使用 ChatGPT 帳號登入，也可透過 API key 驗證；Claude 可使用 Claude 訂閱帳號（Pro、Max、Team、Enterprise）登入，也可透過訂閱 token 或 API key 驗證。使用 Claude 時，在 `env/.env.shared` 設定 `AI_PROVIDER=claude`，見[共用設定](#共用設定)。
 
 ### 設定檔與 Discord Webhook
 
@@ -37,10 +43,10 @@ codex login
 
 | 檔案 | 內容 |
 | --- | --- |
-| `env/.env.shared` | 所有主題共用的 Codex 設定（執行檔、模型、API key、摘要逾時），環境變數格式 |
+| `env/.env.shared` | 所有主題共用的 AI 設定（使用的 AI、執行檔、模型、API key、摘要逾時），環境變數格式 |
 | `env/artale.js`、`env/crypto.js` | 各主題的**所有設定**：Webhook、排程、內容、名稱與頭像變更提醒、紀錄位置。JS 檔，可以直接寫註解 |
 
-共用 Codex 設定可先複製範例 [env/.env.shared.example](env/.env.shared.example)；若沿用 Codex 預設值及 CLI 登入資訊，可省略正式共用檔：
+共用 AI 設定可先複製範例 [env/.env.shared.example](env/.env.shared.example)；若使用 Codex 並沿用預設值及 CLI 登入資訊，可省略正式共用檔：
 
 ```bash
 cp env/.env.shared.example env/.env.shared
@@ -53,7 +59,7 @@ cp env/artale.example.js env/artale.js
 cp env/crypto.example.js env/crypto.js
 ```
 
-主題設定檔以 `export default` 匯出設定物件；除了 `webhooks` 以外都是選填，欄位名稱寫錯或型別不符時，程式會指出檔案與欄位並停止。共用檔只讀取 Codex 等共用設定，系統環境變數優先，包含已設定的空值；系統環境變數不會覆寫主題設定。程式不讀取根目錄舊 `.env`；舊版的 `env/.env.artale`、`env/.env.crypto` 已停用，仍存在時會提醒搬到新的設定檔。
+主題設定檔以 `export default` 匯出設定物件；除了 `webhooks` 以外都是選填，欄位名稱寫錯或型別不符時，程式會指出檔案與欄位並停止。共用檔只讀取 AI 等共用設定，系統環境變數優先，包含已設定的空值；系統環境變數不會覆寫主題設定。程式不讀取根目錄舊 `.env`；舊版的 `env/.env.artale`、`env/.env.crypto` 已停用，仍存在時會提醒搬到新的設定檔。
 
 正式設定檔已列入 `.gitignore`，只有範例檔納入版本控制。
 
@@ -65,22 +71,41 @@ cp env/crypto.example.js env/crypto.js
 
 ## 共用設定
 
-以下設定放在 `env/.env.shared`，由共用 Codex CLI 執行器使用：
+以下設定放在 `env/.env.shared`，由共用 AI 摘要執行器使用：
 
 | 變數 | 預設值 | 用途 |
 | --- | --- | --- |
-| `CODEX_BIN` | `codex` | CLI 執行檔名稱或絕對路徑 |
-| `CODEX_MODEL` | Codex 設定檔的模型 | 摘要使用的模型 |
-| `CODEX_TIMEOUT_MS` | `300000`（5 分鐘） | 單次摘要逾時時間，與公告輪詢間隔分開；Crypto 網路搜尋另用 `CRYPTO_CODEX_TIMEOUT_MS` |
-| `CODEX_API_KEY` | 使用 CLI 已儲存的登入資訊 | 以 API key 執行時提供，由子程序繼承 |
+| `AI_PROVIDER` | `codex` | 使用的 AI：`codex`（Codex CLI）或 `claude`（Claude Code CLI） |
+| `AI_TIMEOUT_MS` | `300000`（5 分鐘） | 單次摘要逾時時間，與公告輪詢間隔分開；舊名稱 `CODEX_TIMEOUT_MS` 仍可使用。Crypto 網路搜尋另用 `env/crypto.js` 的 `aiTimeoutMs` |
+| `CODEX_BIN` | `codex` | Codex CLI 執行檔名稱或絕對路徑 |
+| `CODEX_MODEL` | Codex 設定檔的模型 | 使用 Codex 時的模型 |
+| `CODEX_API_KEY` | 使用 CLI 已儲存的登入資訊 | 以 API key 執行 Codex 時提供，由子程序繼承 |
+| `CLAUDE_BIN` | `claude` | Claude Code CLI 執行檔名稱或絕對路徑 |
+| `CLAUDE_MODEL` | Claude Code 預設模型 | 使用 Claude 時的模型，可寫別名（`sonnet`、`opus`、`haiku`）或完整模型 ID |
+| `CLAUDE_CODE_OAUTH_TOKEN` | 使用 CLI 已儲存的登入資訊 | `claude setup-token` 產生的訂閱 token，供無法互動登入的主機使用 |
+| `ANTHROPIC_API_KEY` | 不使用 | 以 Anthropic API key 執行 Claude，按 API 用量計費；有設定時優先於訂閱登入 |
 
-本專案使用 `codex exec`，沿用 CLI 已儲存的登入資訊，也可透過 `CODEX_API_KEY` 提供 API key，詳見 [OpenAI 官方文件](https://learn.chatgpt.com/docs/non-interactive-mode#authenticate-in-automation)。各主題提供自己的提示詞與輸出 Schema；需要最新資訊的主題（Crypto）會以 `-c web_search="live"` 開放即時網路搜尋。
+各主題提供自己的提示詞與輸出 Schema，兩種 AI 共用；切換 `AI_PROVIDER` 後重新啟動常駐排程即可，不需修改主題設定。
+
+### Codex
+
+本專案使用 `codex exec`，沿用 CLI 已儲存的登入資訊，也可透過 `CODEX_API_KEY` 提供 API key，詳見 [OpenAI 官方文件](https://learn.chatgpt.com/docs/non-interactive-mode#authenticate-in-automation)。需要最新資訊的主題（Crypto）會以 `-c web_search="live"` 開放即時網路搜尋。
+
+### Claude
+
+本專案使用 `claude -p` 非互動模式，沿用 `claude auth login` 的登入資訊，也可透過 `CLAUDE_CODE_OAUTH_TOKEN` 或 `ANTHROPIC_API_KEY` 驗證，詳見 [Claude Code 官方文件](https://code.claude.com/docs/en/headless)。每次執行：
+
+- 在空的暫存資料夾執行，不讀取使用者與專案的設定檔（hooks、外掛、權限規則），不載入 MCP 伺服器，也不保存對話紀錄。
+- 預設不提供任何工具；需要最新資訊的主題（Crypto）只開放 `WebSearch`、`WebFetch` 網路搜尋。
+- 輸出 Schema 以 `--json-schema` 傳入；AI 感想的新頭像圖片以 stream-json 格式附在訊息中。
+
+系統環境變數或 `env/.env.shared` 有 `ANTHROPIC_API_KEY` 時，即使已用訂閱帳號登入，Claude 也會改用 API key 並按用量計費；要使用訂閱額度請移除此變數。
 
 路徑規則：通知紀錄、發文紀錄及 `--history-file` 的相對路徑以專案根目錄為準；手動發文的 `--file` 以目前執行目錄為準。
 
 ## 共用 Webhook 工具
 
-可直接新增、修改、刪除或查詢訊息，**不抓取公告、不呼叫 Codex、不修改公告去重紀錄**。
+可直接新增、修改、刪除或查詢訊息，**不抓取公告、不呼叫 AI、不修改公告去重紀錄**。
 
 ```bash
 npm run webhook -- --help
@@ -156,7 +181,7 @@ npm run webhook -- edit --source crypto --message-id 123456789012345678 --file e
 Webhook 的名稱與頭像可以被伺服器管理員在 Discord 頻道設定中更換，Discord 不會通知 Webhook。共用模組 `src/shared/webhook-profile.js` 會在各主題每次正式執行時查詢目前的名稱與頭像，和該主題上次的記錄比較；被更換時依主題設定發送提醒：
 
 - 每個 Webhook（機器人）的定位不同，提醒設定寫在主題設定檔 `webhooks` 中各 Webhook 的 `webhookProfile`。
-- 有角色設定提示詞（`personaPrompt`）時，由 Codex 看新頭像圖片與新名稱，以角色口吻寫感想。
+- 有角色設定提示詞（`personaPrompt`）時，由 AI（Codex 或 Claude）看新頭像圖片與新名稱，以角色口吻寫感想。
 - 沒有提示詞時，直接發送固定文字（`avatarMessage`、`nameMessage`）。
 - 三者都是空的（預設）時不發送。兩者同時被更換時發送兩行：第一行頭像、第二行名稱。
 
@@ -166,8 +191,10 @@ Webhook 的名稱與頭像可以被伺服器管理員在 Discord 頻道設定中
 
 | 現象 | 處理方式 |
 | --- | --- |
-| 找不到 Codex CLI | 安裝並登入；PATH 找不到時，設定 `CODEX_BIN` 絕對路徑 |
-| Codex CLI 執行失敗 | 查看錯誤輸出，確認登入、額度與逾時設定 |
+| 找不到 Codex CLI 或 Claude Code CLI | 安裝並登入；PATH 找不到時，設定 `CODEX_BIN` 或 `CLAUDE_BIN` 絕對路徑 |
+| Codex CLI 或 Claude Code CLI 執行失敗 | 查看錯誤輸出，確認登入、額度、模型名稱與逾時設定 |
+| `AI_PROVIDER 只能是 codex 或 claude` | 修正 `env/.env.shared` 或系統環境變數的 `AI_PROVIDER` |
+| Claude 按 API 用量計費，而不是使用訂閱額度 | 移除系統環境變數或 `env/.env.shared` 中的 `ANTHROPIC_API_KEY` |
 | `bad CPU type in executable` | 執行 `nvm use`，確認 Node 架構適合目前電腦；可用 `nvm alias default 22` 設定預設版本 |
 | 找不到 Webhook 設定 | 確認選擇的來源、主題設定檔 `env/<主題>.js` 的 `webhooks`，或 `--webhook` 參數 |
 | 修改／刪除回傳 HTTP 404 | 確認訊息 ID 與原 Webhook；訊息或 Webhook 可能已刪除 |
@@ -188,7 +215,10 @@ npm test
 | --- | --- |
 | Discord API、網址驗證與限流重試 | `src/shared/discord.js` |
 | 發文操作及訊息 ID 紀錄 | `src/shared/posts.js` |
-| Codex CLI、輸出 Schema 與逾時處理 | `src/shared/codex.js` |
+| 選擇 AI（`AI_PROVIDER`）與摘要入口 | `src/shared/ai.js` |
+| Codex CLI 執行器 | `src/shared/codex.js` |
+| Claude Code CLI 執行器 | `src/shared/claude.js` |
+| 外部 CLI 執行、逾時與錯誤處理 | `src/shared/process.js` |
 | 排程設定與時間計算 | `src/shared/schedule.js` |
 | 分來源環境檔載入與專案路徑 | `src/shared/env.js` |
 | 紀錄輸出 | `src/shared/log.js` |
@@ -205,7 +235,7 @@ npm test
 ├── README.md           # 共用環境與工具說明
 ├── docs/               # 各主題的使用文件
 ├── env/
-│   ├── .env.shared.example # 共用 Codex 設定範本
+│   ├── .env.shared.example # 共用 AI 設定範本
 │   ├── .env.shared     # 正式共用設定，不納入版本控制
 │   ├── <主題>.example.js # 各主題設定檔範例
 │   └── <主題>.js       # 各主題正式設定檔（Webhook、排程、內容、提醒），不納入版本控制
@@ -214,7 +244,7 @@ npm test
 ├── examples/           # 手動發文 JSON 範本
 ├── data/               # 依來源分資料夾存放紀錄，不納入版本控制
 ├── src/
-│   ├── shared/         # 共用 Discord、Codex、排程與環境工具
+│   ├── shared/         # 共用 Discord、AI、排程與環境工具
 │   ├── webhook.js      # 共用手動發文管理入口
 │   ├── artale/         # Artale 公告通知，詳見專屬文件
 │   └── crypto/         # 每日美國經濟與虛擬貨幣新聞，詳見專屬文件

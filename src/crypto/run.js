@@ -2,13 +2,13 @@
  * 主流程模組：完成一次每日新聞發送。支援多個 Webhook，新聞只搜尋一次，再分別發送到每個 Webhook。
  *
  *   1. 檢查每個 Webhook 的名稱與頭像是否被更換                         （../shared/webhook-profile.js）
- *   2. 以 Codex CLI 網路搜尋發送前 24 小時的美國經濟與虛擬貨幣新聞      （news.js）
+ *   2. 以 AI（Codex 或 Claude）網路搜尋發送前 24 小時的美國經濟與虛擬貨幣新聞（news.js）
  *   3. 每個今天尚未完成的 Webhook：
  *      a. 刪除該 Webhook 前一次發送、仍留在 Discord 上的新聞訊息         （state.js 記錄的訊息 ID）
  *      b. 發送今天的新聞                                               （format.js、../shared/posts.js）
  *      c. 記錄該 Webhook 今天已完成，同一天不重複發送                   （state.js）
  *
- * 先取得新聞才刪除舊訊息：Codex 搜尋失敗時，前一次的新聞會保留在頻道上。
+ * 先取得新聞才刪除舊訊息：AI 搜尋失敗時，前一次的新聞會保留在頻道上。
  * 刪除失敗（訊息已不存在除外）時不發送該 Webhook 今天的新聞，確保「先刪除、再發送」的順序。
  * 某個 Webhook 失敗不影響其他 Webhook；全部處理完後才拋錯，重試時只處理尚未完成的 Webhook。
  *
@@ -18,7 +18,7 @@ import { config } from './config.js';
 import { buildDiscordMessages } from './format.js';
 import { buildNewsPrompt, NEWS_SCHEMA, parseNews } from './news.js';
 import { loadDigestState, saveDigestState, targetEntry, withTargetEntry } from './state.js';
-import { summarizeWithCodex } from '../shared/codex.js';
+import { aiLabel, summarizeWithAi } from '../shared/ai.js';
 import { log, logError } from '../shared/log.js';
 import { listPosts, managePost } from '../shared/posts.js';
 import { dateKeyInZone, formatDateInZone, formatInZone } from '../shared/schedule.js';
@@ -78,7 +78,7 @@ export async function runDaily({ dryRun = false, force = false, now = Date.now()
   // 提醒訊息不列入每日新聞紀錄，之後不會被刪除。
   if (!dryRun) {
     for (const target of config.targets) {
-      await checkWebhookProfile(target.url, { ...target.webhookProfile, codex: config.codex, ...postOptions });
+      await checkWebhookProfile(target.url, { ...target.webhookProfile, ai: config.ai, ...postOptions });
     }
   }
 
@@ -90,12 +90,12 @@ export async function runDaily({ dryRun = false, force = false, now = Date.now()
     return { status: 'skipped', state };
   }
 
-  // 步驟 1：以 Codex 搜尋並整理新聞（所有 Webhook 共用同一份新聞）
+  // 步驟 1：以 AI 搜尋並整理新聞（所有 Webhook 共用同一份新聞）
   const from = new Date(runAt.getTime() - NEWS_WINDOW_MS);
-  log(`以 Codex 搜尋新聞：${formatInZone(from, timeZone)} ～ ${formatInZone(runAt, timeZone)}（時區 ${timeZone}），約需數分鐘…`);
+  log(`以 ${aiLabel(config.ai.provider)} 搜尋新聞：${formatInZone(from, timeZone)} ～ ${formatInZone(runAt, timeZone)}（時區 ${timeZone}），約需數分鐘…`);
   log(`篇數：美國經濟 ${config.news.economyCount} 則、虛擬貨幣最多 ${config.news.coinCount} 則；幣種優先順序：${config.news.priorityCoins.join(' → ')}`);
   const prompt = buildNewsPrompt({ from, to: runAt, timeZone, ...config.news });
-  const reply = await summarizeWithCodex(prompt, { ...config.codex, schema: NEWS_SCHEMA });
+  const reply = await summarizeWithAi(prompt, { ...config.ai, schema: NEWS_SCHEMA });
   const news = parseNews(reply, config.news);
   log(`取得美國經濟新聞 ${news.economy.length} 則、虛擬貨幣新聞 ${news.crypto.length} 則：`);
   for (const item of news.economy) log(`  [美國經濟] ${item.title}`);

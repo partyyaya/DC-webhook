@@ -1,10 +1,10 @@
 /**
- * Artale 摘要規則：組出給 Codex 的提示詞，解析購物商場與維護摘要。
+ * Artale 摘要規則：組出給 AI 的提示詞，解析購物商場與維護摘要。
  *
  * 依分類產生三種摘要：
- *   - 版本更新（購物商場、維護以外的分類）：Codex 直接寫出 Markdown 文字，放進一張 Discord 卡片。
- *   - 維護：Codex 依 MAINTENANCE_SCHEMA 擷取維護時段，只輸出維護時間。
- *   - 購物商場：Codex 依 SHOP_SCHEMA 回覆 JSON（每個商品的名稱、價格、內容物、圖片、連結與購買資訊），
+ *   - 版本更新（購物商場、維護以外的分類）：AI 直接寫出 Markdown 文字，放進一張 Discord 卡片。
+ *   - 維護：AI 依 MAINTENANCE_SCHEMA 擷取維護時段，只輸出維護時間。
+ *   - 購物商場：AI 依 SHOP_SCHEMA 回覆 JSON（每個商品的名稱、價格、內容物、圖片、連結與購買資訊），
  *     再由 format.js 組成「先圖片、再文字」的多張卡片。
  *
  */
@@ -36,7 +36,7 @@ const MAINTENANCE_PROMPT = {
 };
 
 // 「購物商場」公告的提示詞：整理商品、價格、內容物、圖片、連結、購買條件、限購次數與販售時間。
-// Codex 會依 SHOP_SCHEMA 回覆 JSON，由 format.js 組成「先圖片、再文字」的卡片。
+// AI 會依 SHOP_SCHEMA 回覆 JSON，由 format.js 組成「先圖片、再文字」的卡片。
 const SHOP_PROMPT = {
   intro:
     '你是 Artale（楓之谷世界）官方公告的整理助手。請閱讀下方的購物商場公告，整理「這次購物商場更新了哪些商品、需要多少 WC、禮包與內容物名稱」，以繁體中文（台灣用語）填入指定的 JSON 欄位。',
@@ -58,7 +58,7 @@ const SHOP_PROMPT = {
   ],
 };
 
-// 購物商場摘要的 JSON 格式（JSON Schema），透過 --output-schema 要求 Codex 的回覆必須符合
+// 購物商場摘要的 JSON 格式（JSON Schema），要求 AI 的回覆必須符合
 export const SHOP_SCHEMA = {
   type: 'object',
   properties: {
@@ -108,11 +108,11 @@ const COMMON_RULES = [
 ];
 
 /**
- * 組出要交給 Codex 的提示詞：依分類選擇撰寫規則 + 公告標題、分類、發布時間 + 公告全文。
+ * 組出要交給 AI 的提示詞：依分類選擇撰寫規則 + 公告標題、分類、發布時間 + 公告全文。
  * 想調整 Discord 訊息的內容或格式，修改上方的 UPDATE_PROMPT、SHOP_PROMPT、COMMON_RULES 即可。
  *
  * 提示詞只依分類決定，與比對結果（新公告／公告更新）無關，同一篇公告的摘要可共用給所有 Webhook；
- * 「（公告已更新）」等標示由 format.js 依各 Webhook 的比對結果加上，不交給 Codex 判斷。
+ * 「（公告已更新）」等標示由 format.js 依各 Webhook 的比對結果加上，不交給 AI 判斷。
  *
  * @param {object} announcement 公告資料（title、category、publishedAt、content）
  * @param {string} [category] bm 使用商品 JSON，maintenance 使用維護時段 JSON，其他使用版本更新格式
@@ -146,20 +146,20 @@ export function buildSummaryPrompt(announcement, category) {
 /** 只使用維護時段欄位組成內文，避免其他公告內容被帶入。 */
 export function parseMaintenanceSummary(text) {
   let data;
-  try { data = JSON.parse(text); } catch { throw new Error('Codex 回覆的維護時間不是有效的 JSON'); }
+  try { data = JSON.parse(text); } catch { throw new Error('AI 回覆的維護時間不是有效的 JSON'); }
   if (!data || !Array.isArray(data.periods) || data.periods.some(period => typeof period !== 'string')) {
-    throw new Error('Codex 回覆的維護時間格式不符');
+    throw new Error('AI 回覆的維護時間格式不符');
   }
   const periods = [...new Set(data.periods.map(period => period.trim()).filter(Boolean))];
   return periods.length > 0 ? periods.map(period => `維護時間：${period}`).join('\n') : '維護時間：公告未註明';
 }
 
 /**
- * 解析並檢查 Codex 回覆的購物商場 JSON。
+ * 解析並檢查 AI 回覆的購物商場 JSON。
  * 格式不符時拋錯；圖片與連結網址必須確實出現在公告原文中才採用，
  * 避免 AI 編造或改錯網址，不符合的圖片改為 null、連結直接移除。
  *
- * @param {string} text Codex 的回覆
+ * @param {string} text AI 的回覆
  * @param {string} content 公告原文（Markdown），用來核對網址
  * @returns {{products: Array<{name: string, price: string, contents: string[], image: string | null, links: Array<{text: string, url: string}>, purchaseConditions: string, purchaseLimit: string, salePeriod: string}>, otherChanges: string[]}}
  */
@@ -168,10 +168,10 @@ export function parseShopSummary(text, content) {
   try {
     data = JSON.parse(text);
   } catch {
-    throw new Error('Codex 回覆的購物商場資料不是有效的 JSON');
+    throw new Error('AI 回覆的購物商場資料不是有效的 JSON');
   }
   if (!data || !Array.isArray(data.products) || !Array.isArray(data.otherChanges)) {
-    throw new Error('Codex 回覆的購物商場資料格式不符');
+    throw new Error('AI 回覆的購物商場資料格式不符');
   }
 
   // 去除空白、移除空字串與重複項目
@@ -200,14 +200,14 @@ export function parseShopSummary(text, content) {
 
   // 模型明確回覆兩個空陣列時，代表沒有需通知的內容；非空資料清理後全數無效仍視為錯誤。
   if (products.length === 0 && otherChanges.length === 0 && (data.products.length > 0 || data.otherChanges.length > 0)) {
-    throw new Error('Codex 回覆的購物商場資料沒有任何商品或異動');
+    throw new Error('AI 回覆的購物商場資料沒有任何商品或異動');
   }
   return { products, otherChanges };
 }
 
 /**
- * 預覽用：不經過 Codex，直接從公告原文粗略擷取每個商品的名稱、價格、圖片與連結。
- * 只在 --dry-run 且 Codex 無法使用時使用，讓還沒安裝 Codex 時也能預覽「先圖片、再文字」的版面；
+ * 預覽用：不經過 AI，直接從公告原文粗略擷取每個商品的名稱、價格、圖片與連結。
+ * 只在 --dry-run 且 AI 無法使用時使用，讓還沒安裝 AI CLI 時也能預覽「先圖片、再文字」的版面；
  * 內容物以預覽提示代替，購買資訊需要 AI 整理，這裡留空省略。
  *
  * @param {string} content 公告原文（Markdown）
@@ -224,7 +224,7 @@ export function previewShopSummary(content) {
     products.push({
       name,
       price: section.match(/販售價格：\s*([^\n]+)/)?.[1]?.trim() ?? '價格未註明',
-      contents: ['（預覽模式：內容物需由 Codex 整理）'],
+      contents: ['（預覽模式：內容物需由 AI 整理）'],
       image: section.match(/!\[[^\]]*\]\((https?:[^)\s]+)\)/)?.[1] ?? null,
       links: [...section.matchAll(/(?<!!)\[([^[\]]+)\]\((https?:[^)\s]+)\)/g)].map(([, text, url]) => ({ text, url })),
       purchaseConditions: '',
