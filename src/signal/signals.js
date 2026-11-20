@@ -19,7 +19,7 @@ import { formatDateInZone, formatInZone } from '../shared/schedule.js';
 import { normalizeSymbol } from '../shared/symbols.js';
 
 // 原因與注意事項的長度上限：確保一則訊息放滿 10 張卡片時，文字總量仍在 Discord 的 6000 字限制內
-export const REASON_MAX = 260;
+export const REASON_MAX = 250;
 export const NOTE_MAX = 100;
 // 限價進場價與現價最多相差的比例，超過視為不合理
 const MAX_ENTRY_GAP = 0.2;

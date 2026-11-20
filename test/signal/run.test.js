@@ -127,7 +127,7 @@ test('取得行情並計算指標，由 AI 判斷是否做單；每個市場一�
   assert.match(tw.content, /AUTO：從上市櫃普通股中前一交易日成交金額最大的 1 個標的中篩選出趨勢向上的 1 個，由 AI 挑選最多 3 個/);
   assert.match(tw.embeds[0].description,
     /^🏷️ \*\*標的\*\*：\*\*2330 台積電\*\*，\*\*是否做單\*\*：🟢 \*\*做多\*\*\n💰 \*\*進場（限價・待觸發）\*\*：`102`，\*\*風險報酬比\*\*：1:2\.5\n🎯 \*\*止盈\*\*：`112`（\+9\.8%），\*\*止損\*\*：`99`（-2\.9%）\n/);
-  assert.equal(tw.embeds[0].footer.text, '資料來源：Yahoo Finance 2330.TW');
+  assert.equal(tw.embeds[0].footer.text, '現價 104 新台幣・資料來源：Yahoo Finance 2330.TW');
   assert.equal(us.embeds[0].footer.text, '現價 104 美元・資料來源：Yahoo Finance NVDA');
   assert.equal(us.embeds[0].description, '🏷️ **標的**：**NVDA**，**是否做單**：⚪ **觀望**\n📊 **原因**：NVDA 趨勢不明');
   assert.deepEqual((await loadDigestState(config.stateFile)).targets, { [A]: { completedDate: '2026-11-20', messageIds: ['901', '902', '903', '904'] } });

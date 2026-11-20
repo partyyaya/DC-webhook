@@ -13,7 +13,7 @@
  *   📊 原因：……
  *   📝 注意事項：若……，則直接撤單      （選填）
  * 風險報酬比為扣除交易成本後的數值（signals.js）。
- * 可以做單時不顯示現價，避免與進場價混淆；觀望時不顯示進場、止盈、止損，現價顯示在卡片底部。
+ * 觀望時不顯示進場、止盈、止損。每張卡片底部都顯示現價與資料來源。
  * AUTO 沒有挑出任何標的時（找不到符合條件的標的，或市場不適合做單），顯示一張觀望卡片。
  */
 import { AUTO_MAX_PICKS, INTERVALS, marketOf } from './markets.js';
@@ -97,11 +97,10 @@ function signalEmbed(signal, info) {
   }
   lines.push(item('📊', '原因', signal.reason));
   if (signal.note) lines.push(item('📝', '注意事項', signal.note));
-  // 可以做單時只顯示進場價，不顯示現價，避免兩個價位混淆；觀望時在卡片底部顯示現價
-  const source = `資料來源：${signal.source} ${signal.ticker}`;
+  // 卡片底部：現價（含價格單位）與資料來源
   return {
     description: lines.join('\n'),
     color: COLORS[kind],
-    footer: { text: trade ? source : `現價 ${price(signal.price)} ${info.currency}・${source}` },
+    footer: { text: `現價 ${price(signal.price)} ${info.currency}・資料來源：${signal.source} ${signal.ticker}` },
   };
 }
