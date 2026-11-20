@@ -7,7 +7,8 @@
 // 共用的 AI 設定（使用 Codex 或 Claude、執行檔、模型、API key）放在 env/.env.shared。
 //
 // 在排程時段內定時取得日線 K 線、計算 EMA／MACD／RSI／ADX／ATR／費波那契／成交量，再由 AI 判斷是否做單，
-// 給出進場、止盈、止損與原因。一律以「不開槓桿」為準：只做現貨買進（做多），不放空。
+// 給出做多或做空的進場、止盈、止損與原因。一律不開槓桿（1 倍）：做多為現貨買進；
+// 做空時虛擬貨幣以 USDT 永續合約 1 倍、台股與美股以融券放空（各市場可用 allowShort 關閉）。
 // 價格單位：虛擬貨幣與美股為美元（虛擬貨幣使用 USDT 交易對），台股為新台幣。
 
 export default {
@@ -58,6 +59,10 @@ export default {
   // 每個市場的 symbols：代號清單（最多 10 個，依填寫順序顯示），或填 'AUTO' 交給 AI 挑選最多 3 個可以嘗試做單的標的
   //   （3 個是上限：AI 找不到符合條件的標的、或市場不適合做單時就不給，顯示建議觀望）；
   //   留空（[]）代表不分析這個市場，三個市場不能都留空。
+  // 每個市場的 allowShort：是否可以做空（true／false），預設 true；false 時只做多或觀望。能否放空的確認方式：
+  //   crypto  Binance、Bybit、Bitget 任一家有 USDT 永續合約（沒有的幣只能做多，例如 SNEK）
+  //   tw      證交所、櫃買中心的融資融券資料中可融券（融券限額大於 0 且未停止融券）
+  //   us      沒有免費資料可確認，做空前請自行確認券商可借券
   // AUTO 的候選：
   //   crypto  24 小時成交額最大的 15 個 USDT 交易對（排除穩定幣）
   //   tw      前一交易日成交金額最大的 15 檔上市櫃普通股（不含 ETF）
@@ -67,14 +72,17 @@ export default {
     // （例如 SNEK 只有 Bitget 有，會自動改用 Bitget）
     crypto: {
       symbols: ['BTC', 'ETH'], // 幣種代號，大小寫不拘；寫成 'BTCUSDT' 也可以
+      allowShort: true, // 是否可以做空（USDT 永續合約 1 倍）
     },
     // 台股（上市、上櫃），價格單位為新台幣；K 線來自 Yahoo Finance
     tw: {
       symbols: ['2330', '2345'], // 台股代號；0 開頭的代號（例如 '0050'）一定要加引號
+      allowShort: true, // 是否可以做空（融券）
     },
     // 美股，價格單位為美元；K 線來自 Yahoo Finance
     us: {
       symbols: ['NVDA', 'AAPL'], // 美股代號，大小寫不拘；類別股寫 'BRK.B'
+      allowShort: true, // 是否可以做空（融券，需保證金帳戶）
     },
   },
 

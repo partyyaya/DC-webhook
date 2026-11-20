@@ -6,14 +6,21 @@
  *   台股名稱與上市／上櫃：證交所與櫃買中心 OpenAPI
  *
  * 只使用已收盤的 K 線計算指標；尚未收盤的最後一根只用來取得現價。
+ * 股票的日線使用還原權息價格（Yahoo Finance 的還原收盤價），避免除權息的跳空被當成下跌。
+ * 最後一根已收盤 K 線太舊（STALE_DAYS）時視為資料停止更新，不分析。
  *
- * AUTO 的候選標的（各取前 AUTO_CANDIDATES 名，再由 AI 挑選）：
+ * 可以做空（allowShort）時另外確認標的能否放空：
+ *   虛擬貨幣：Binance、Bybit、Bitget 任一家有 USDT 永續合約
+ *   台股：證交所、櫃買中心的融資融券資料中，融券限額大於 0 且沒有停止融券
+ *   美股：沒有免費的借券資料，無法確認
+ *
+ * AUTO 的候選標的（各取前 AUTO_CANDIDATES 名，先以趨勢條件篩選：趨勢向上，可以做空時也包含趨勢向下，再由 AI 挑選）：
  *   虛擬貨幣：24 小時成交額最大的 USDT 交易對（Binance，失敗時依序改用 Bybit、Bitget），排除穩定幣、包裝幣與貴金屬代幣
  *   台股：前一交易日成交金額最大的上市櫃普通股（不含 ETF）
  *   美股：Yahoo Finance「Most Actives」中成交金額最大、股價 5 美元以上的股票
  */
-import { analyzeCandles } from './indicators.js';
-import { AUTO_CANDIDATES, INTERVALS, isMarketEnabled, MARKETS } from './markets.js';
+import { analyzeCandles, isDowntrend, isUptrend } from './indicators.js';
+import { AUTO_CANDIDATES, INTERVALS, isMarketEnabled, MARKETS, STALE_DAYS } from './markets.js';
 import { logError } from '../shared/log.js';
 import { normalizeSymbol, SYMBOL_RULES } from '../shared/symbols.js';
 
@@ -21,9 +28,12 @@ const URLS = {
   binance: 'https://api.binance.com',
   bybit: 'https://api.bybit.com',
   bitget: 'https://api.bitget.com',
+  binanceFutures: 'https://fapi.binance.com',
   yahoo: 'https://query1.finance.yahoo.com',
   twse: 'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL',
   tpex: 'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes',
+  twseMargin: 'https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN',
+  tpexMargin: 'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_margin_balance',
 };
 // Yahoo Finance 沒有 User-Agent 會回覆 429
 const USER_AGENT = 'Mozilla/5.0 (compatible; dcwebhook/1.0)';
@@ -116,9 +126,9 @@ async function bybitCandles(pair, interval, { timeoutMs }) {
   })).sort((a, b) => a.time - b.time);
 }
 
-/** Bitget 公開行情 API：成功時 code 為 '00000'。 */
-async function bitgetData(path, timeoutMs) {
-  const data = await getJson(`${URLS.bitget}/api/v2/spot/market/${path}`, { timeoutMs });
+/** Bitget 公開行情 API（spot 現貨、mix 合約）：成功時 code 為 '00000'。 */
+async function bitgetData(path, timeoutMs, kind = 'spot', query = '') {
+  const data = await getJson(`${URLS.bitget}/api/v2/${kind}/market/${path}${query ? `?${query}` : ''}`, { timeoutMs });
   if (data?.code !== '00000') throw new Error(data?.msg || `code ${data?.code}`);
   return data.data;
 }
@@ -205,10 +215,17 @@ async function yahooCandles(ticker, interval, { now, timeoutMs }) {
   if (!result) throw notFound(data?.chart?.error?.description ?? '沒有資料');
   const { meta = {}, timestamp = [], indicators } = result;
   const quote = indicators?.quote?.[0] ?? {};
+  // 日線有還原收盤價時，開高低收都依「還原收盤價 ÷ 收盤價」等比例還原權息；最近一次除權息之後的 K 線不變
+  const adjclose = indicators?.adjclose?.[0]?.adjclose;
   const bars = timestamp
-    .map((time, i) => ({
-      time: time * 1000, open: quote.open?.[i], high: quote.high?.[i], low: quote.low?.[i], close: quote.close?.[i], volume: quote.volume?.[i] ?? 0,
-    }))
+    .map((time, i) => {
+      const close = quote.close?.[i];
+      const factor = Number.isFinite(adjclose?.[i]) && close > 0 ? adjclose[i] / close : 1;
+      return {
+        time: time * 1000, open: quote.open?.[i] * factor, high: quote.high?.[i] * factor, low: quote.low?.[i] * factor, close: close * factor,
+        volume: quote.volume?.[i] ?? 0,
+      };
+    })
     .filter((bar) => [bar.open, bar.high, bar.low, bar.close].every(Number.isFinite));
   if (bars.length === 0) throw notFound('沒有 K 線資料');
 
@@ -217,6 +234,7 @@ async function yahooCandles(ticker, interval, { now, timeoutMs }) {
   return {
     source: 'Yahoo Finance',
     ticker,
+    adjusted: Array.isArray(adjclose),
     candles: closedCandles(all, now),
     price: Number.isFinite(meta.regularMarketPrice) ? meta.regularMarketPrice : all.at(-1).close,
     priceTime: Number.isFinite(meta.regularMarketTime) ? meta.regularMarketTime * 1000 : all.at(-1).time,
@@ -391,6 +409,44 @@ async function usCandidates(limit, timeoutMs) {
     .map(({ symbol }) => ({ symbol }));
 }
 
+// ---- 能否放空 ----
+
+/**
+ * 取得可以放空的標的：虛擬貨幣為有 USDT 永續合約的交易對（例如 BTCUSDT），台股為可融券的代號。
+ * 多個來源取聯集，其中一個失敗時仍使用其他來源；全部失敗或美股（沒有免費資料）時回傳 null（無法確認）。
+ *
+ * @param {'crypto' | 'tw' | 'us'} market 市場
+ * @param {object} [options]
+ * @param {number} [options.timeoutMs] 每個請求的逾時時間
+ * @returns {Promise<Set<string> | null>}
+ */
+export async function fetchShortableSymbols(market, { timeoutMs } = {}) {
+  const loaders = {
+    crypto: [
+      async () => (await getJson(`${URLS.binanceFutures}/fapi/v1/ticker/price`, { timeoutMs })).map((row) => row.symbol),
+      async () => {
+        const data = await getJson(`${URLS.bybit}/v5/market/tickers?category=linear`, { timeoutMs });
+        if (data?.retCode !== 0) throw new Error(data?.retMsg || `retCode ${data?.retCode}`);
+        return data.result.list.map((row) => row.symbol);
+      },
+      async () => (await bitgetData('tickers', timeoutMs, 'mix', 'productType=USDT-FUTURES')).map((row) => row.symbol),
+    ],
+    // 融券限額大於 0，且註記沒有 X（停止融券）
+    tw: [
+      async () => (await getJson(URLS.twseMargin, { timeoutMs }))
+        .filter((row) => Number(row['融券限額']) > 0 && !String(row['註記'] ?? '').includes('X'))
+        .map((row) => String(row['股票代號']).trim()),
+      async () => (await getJson(URLS.tpexMargin, { timeoutMs }))
+        .filter((row) => Number(row.ShortSaleQuota) > 0)
+        .map((row) => String(row.SecuritiesCompanyCode).trim()),
+    ],
+  }[market];
+  if (!loaders) return null;
+  const results = await Promise.allSettled(loaders.map((load) => load()));
+  const lists = results.filter((result) => result.status === 'fulfilled' && Array.isArray(result.value)).map((result) => result.value);
+  return lists.length > 0 ? new Set(lists.flat()) : null;
+}
+
 // ---- 整理所有市場的資料 ----
 
 /** 依序處理，同時最多 limit 個。 */
@@ -415,7 +471,9 @@ async function mapLimit(items, limit, fn) {
  * @param {number} options.now 目前時間（毫秒）
  * @param {number} [options.timeoutMs] 每個請求的逾時時間
  * @returns {Promise<object[]>} 每個市場：
- *   items    成功取得資料的標的 {symbol, name, source, ticker, price, priceTime, snapshot}
+ *   items    要交給 AI 判斷的標的 {symbol, name, source, ticker, adjusted, price, priceTime, shortable, snapshot}（AUTO 只含通過趨勢篩選的）；
+ *            shortable 為能否放空：true／false，無法確認時為 null，不可做空的市場為 false
+ *   loaded   成功取得資料的標的數量
  *   errors   指定的標的中無法取得資料的 {symbol, message}（會顯示在 Discord）
  *   failure  AUTO 無法取得候選標的、或所有候選都失敗時的原因（會顯示在 Discord）
  *   candidates AUTO 的候選數量
@@ -433,9 +491,20 @@ export async function prepareMarkets(markets, { now, timeoutMs }) {
 
   const result = [];
   for (const market of enabled) {
-    const { auto, symbols, interval } = markets[market.key];
-    const entry = { key: market.key, interval, auto, candidates: 0, items: [], errors: [], failure: null };
+    const { auto, symbols, interval, allowShort = false } = markets[market.key];
+    // candidates：AUTO 的候選數量；loaded：成功取得資料的標的數量；items：要交給 AI 判斷的標的（AUTO 為通過趨勢篩選的）
+    const entry = { key: market.key, interval, auto, allowShort, candidates: 0, loaded: 0, items: [], errors: [], failure: null };
     result.push(entry);
+    // 可以做空時，確認哪些標的能放空（null 代表無法確認）
+    const shortable = allowShort
+      ? await fetchShortableSymbols(market.key, { timeoutMs }).catch(() => null)
+      : null;
+    if (allowShort && !shortable && market.key !== 'us') logError(`[${market.name}] 無法取得可放空的標的清單，做空前請自行確認`);
+    const canShort = (symbol) => {
+      if (!allowShort) return false;
+      if (!shortable) return null;
+      return shortable.has(market.key === 'crypto' ? `${symbol}USDT` : symbol);
+    };
 
     let targets;
     if (auto) {
@@ -460,17 +529,28 @@ export async function prepareMarkets(markets, { now, timeoutMs }) {
           ? await fetchCryptoCandles(target.symbol, interval, { now, timeoutMs })
           : await fetchStockCandles(market.key, target.symbol, interval, { now, timeoutMs, exchange: target.exchange });
         const { candles, ...rest } = data;
-        return { item: { symbol: target.symbol, name: target.name ?? '', ...rest, snapshot: analyzeCandles(candles) } };
+        const lastTime = candles.at(-1)?.time;
+        if (lastTime !== undefined && now - lastTime > STALE_DAYS[market.key] * 24 * 60 * 60 * 1000) {
+          throw new Error(`最後一根已收盤 K 線為 ${new Date(lastTime).toISOString().slice(0, 10)}，資料可能已停止更新`);
+        }
+        return { item: { symbol: target.symbol, name: target.name ?? '', ...rest, shortable: canShort(target.symbol), snapshot: analyzeCandles(candles) } };
       } catch (err) {
         logError(`[${market.name} ${target.symbol}] ${err.message}`);
         return { error: { symbol: target.symbol, message: err.message } };
       }
     });
-    entry.items = loaded.filter((row) => row.item).map((row) => row.item);
+    const items = loaded.filter((row) => row.item).map((row) => row.item);
     const errors = loaded.filter((row) => row.error).map((row) => row.error);
-    // AUTO 的候選失敗只記錄在終端機；全部失敗時才顯示在 Discord
-    if (!auto) entry.errors = errors;
-    else if (entry.items.length === 0) entry.failure = `所有候選標的都無法取得行情資料（${errors[0]?.message ?? '未知原因'}）`;
+    entry.loaded = items.length;
+    if (!auto) {
+      entry.items = items;
+      entry.errors = errors;
+      continue;
+    }
+    // AUTO：候選失敗只記錄在終端機，全部失敗時才顯示在 Discord；只把趨勢明確的候選交給 AI：
+    // 趨勢向上（可以做多），以及可以做空時趨勢向下、而且不確定無法放空的標的
+    if (items.length === 0) entry.failure = `所有候選標的都無法取得行情資料（${errors[0]?.message ?? '未知原因'}）`;
+    entry.items = items.filter((item) => isUptrend(item.snapshot) || (allowShort && item.shortable !== false && isDowntrend(item.snapshot)));
   }
   return result;
 }

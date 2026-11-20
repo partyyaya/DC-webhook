@@ -8,7 +8,7 @@ import { aiSettingsFromEnv } from '../shared/ai.js';
 import { createSchedule } from '../shared/schedule.js';
 import { loadProjectEnv, ROOT_DIR } from '../shared/env.js';
 import { parseWebhookTargets } from '../shared/targets.js';
-import { filePath, integer, listText, loadTopicConfig, section, text } from '../shared/topic-config.js';
+import { boolean, filePath, integer, listText, loadTopicConfig, section, text } from '../shared/topic-config.js';
 
 loadProjectEnv();
 
@@ -19,14 +19,15 @@ const schedule = section(settings.schedule, ['days', 'start', 'end', 'intervalMi
 const marketSettings = section(settings.markets, MARKETS.map((market) => market.key), at('markets'));
 const files = section(settings.files, ['state', 'discordMessages'], at('files'));
 
-// 每個市場的標的（代號清單或 AUTO；空的代表不分析）；K 線固定使用日線
+// 每個市場的標的（代號清單或 AUTO；空的代表不分析）與是否可以做空；K 線固定使用日線
 const markets = Object.fromEntries(MARKETS.map((market) => {
   const where = at(`markets.${market.key}`);
-  const value = section(marketSettings[market.key], ['symbols'], where);
+  const value = section(marketSettings[market.key], ['symbols', 'allowShort'], where);
   const symbolsKey = `${where}.symbols`;
   return [market.key, {
     ...parseMarketSymbols(market.key, listText(value.symbols, market.defaultSymbols, symbolsKey), symbolsKey),
     interval: SIGNAL_INTERVAL,
+    allowShort: boolean(value.allowShort, true, `${where}.allowShort`),
   }];
 }));
 if (!Object.values(markets).some(isMarketEnabled)) {

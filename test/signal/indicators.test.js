@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { adx, analyzeCandles, atr, ema, fibonacci, macd, MIN_CANDLES, rma, rsi } from '../../src/signal/indicators.js';
+import { adx, analyzeCandles, atr, ema, fibonacci, isDowntrend, isUptrend, macd, MIN_CANDLES, rma, rsi } from '../../src/signal/indicators.js';
 
 const close = (a, b) => Math.abs(a - b) < 1e-9;
 const assertSeries = (actual, expected) => {
@@ -83,8 +83,26 @@ test('指標快照：取最後一根已收盤 K 線的數值，並偵測 MACD �
   assert.equal(snapshot.volume.ratio, 3);
   assert.deepEqual(snapshot.range20, { high: 111, low: 99 });
   assert.equal(snapshot.fibonacci.trend, 'up');
+  // EMA50 較 5 根前上升；最近 5 根的 RSI 與 MACD 柱狀體；近 20 根只有最後一根上漲；成交額為收盤價 × 成交量
+  assert.ok(Math.abs(snapshot.ema.ema50Slope - ((10 * 2) / 51)) < 1e-9);
+  assert.deepEqual(snapshot.rsi.recent.length, 5);
+  assert.equal(snapshot.rsi.recent.at(-1), 100);
+  assert.equal(snapshot.macd.recentHistogram.length, 5);
+  assert.equal(snapshot.macd.recentHistogram.at(-1), snapshot.macd.histogram);
+  assert.equal(snapshot.volume.upAverage, 300);
+  assert.equal(snapshot.volume.downAverage, null);
+  assert.deepEqual(snapshot.turnover, { last: 33000, average: 10000 });
 
   // 不足 200 根時沒有 EMA200；不足最低數量時拋錯
   assert.equal(analyzeCandles(candlesOf(closes.slice(-100))).ema.ema200, null);
   assert.throws(() => analyzeCandles(candlesOf(closes.slice(0, MIN_CANDLES - 1))), /只有 59 根，至少需要 60 根/);
+});
+
+test('趨勢篩選：向上為收盤價高於 EMA50 且 EMA20 > EMA50，向下為收盤價低於 EMA50 且 EMA20 < EMA50', () => {
+  const rising = analyzeCandles(candlesOf(Array.from({ length: 100 }, (_, i) => 100 + i)));
+  const falling = analyzeCandles(candlesOf(Array.from({ length: 100 }, (_, i) => 200 - i)));
+  // 長期上漲後最後急跌到 EMA50 之下
+  const broken = analyzeCandles(candlesOf([...Array.from({ length: 99 }, (_, i) => 100 + i), 120]));
+  assert.deepEqual([isUptrend(rising), isUptrend(falling), isUptrend(broken)], [true, false, false]);
+  assert.deepEqual([isDowntrend(rising), isDowntrend(falling), isDowntrend(broken)], [false, true, false]);
 });

@@ -241,8 +241,8 @@ test('股票設定錯誤明確指出設定檔與欄位名稱', async (t) => {
   }
 });
 
-test('技術指標設定檔為空時使用預設值：每天 09:10～22:40 每 60 分鐘、台灣時間、三個市場各 2 個代號的日線、不使用網路搜尋', async (t) => {
-  const daily = (symbols) => ({ auto: false, symbols, interval: '1d' });
+test('技術指標設定檔為空時使用預設值：每天 09:10～22:40 每 60 分鐘、台灣時間、三個市場各 2 個代號的日線、可以做空、不使用網路搜尋', async (t) => {
+  const daily = (symbols) => ({ auto: false, symbols, interval: '1d', allowShort: true });
   assert.deepEqual(await readConfig(t, 'signal', {}), {
     targets: [], state: path.join(ROOT, 'data/signal/state.json'), posts: path.join(ROOT, 'data/signal/discord-messages.jsonl'),
     days: [0, 1, 2, 3, 4, 5, 6], start: 550, end: 1360, interval: 60, timeZone: 'Asia/Taipei', timeout: 600000,
@@ -257,7 +257,7 @@ export default {
   schedule: { days: '1-5', start: '09:00', end: '21:00', intervalMinutes: 60, timeZone: 'UTC' },
   markets: {
     crypto: { symbols: 'btc, ETHUSDT' },
-    tw: { symbols: 'auto' },
+    tw: { symbols: 'auto', allowShort: false },
     us: { symbols: [] },
   },
   aiTimeoutMs: 120000,
@@ -268,9 +268,9 @@ export default {
     state: path.join(ROOT, 'data/signal/custom-state.json'), posts: path.join(ROOT, 'data/signal/custom-posts.jsonl'),
     days: [1, 2, 3, 4, 5], start: 540, end: 1260, interval: 60, timeZone: 'UTC', timeout: 120000,
     markets: {
-      crypto: { auto: false, symbols: ['BTC', 'ETH'], interval: '1d' },
-      tw: { auto: true, symbols: [], interval: '1d' },
-      us: { auto: false, symbols: [], interval: '1d' },
+      crypto: { auto: false, symbols: ['BTC', 'ETH'], interval: '1d', allowShort: true },
+      tw: { auto: true, symbols: [], interval: '1d', allowShort: false },
+      us: { auto: false, symbols: [], interval: '1d', allowShort: true },
     },
     webSearch: false,
   });
@@ -284,6 +284,7 @@ test('技術指標設定錯誤明確指出設定檔與欄位名稱', async (t) =
     [{ markets: { tw: { symbols: [50] } } }, '0 開頭的代號（例如 0050）請加引號'],
     [{ markets: { us: { symbols: ['蘋果'] } } }, 'markets.us.symbols 格式錯誤'],
     [{ markets: { us: { symbols: ['NVDA'], interval: '4h' } } }, 'markets.us 有不支援的欄位：interval'],
+    [{ markets: { crypto: { allowShort: 'yes' } } }, 'markets.crypto.allowShort 必須是 true 或 false'],
     [{ markets: { crypto: 'AUTO' } }, 'markets.crypto 必須是物件'],
     [{ markets: { gold: none } }, 'markets 有不支援的欄位：gold'],
     [{ markets: { crypto: { symbol: ['BTC'] } } }, 'markets.crypto 有不支援的欄位：symbol'],

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fetchAutoCandidates, fetchCryptoCandles, fetchStockCandles, fetchTwStockList } from '../../src/signal/market-data.js';
+import {
+  fetchAutoCandidates, fetchCryptoCandles, fetchShortableSymbols, fetchStockCandles, fetchTwStockList, prepareMarkets,
+} from '../../src/signal/market-data.js';
 
 const HOUR = 3_600_000;
 const at = (text) => Date.parse(text);
@@ -106,6 +108,19 @@ test('台股找不到上市代號時改查上櫃；交易時段中的當天日�
   assert.equal(calls.at(-1).url.pathname.split('/').at(-1), '6488.TWO', '已知上櫃時直接查 .TWO');
 });
 
+test('股票日線依還原收盤價等比例還原權息（開高低收都調整，成交量不變）', async (t) => {
+  const bars = [bar(at('2026-11-18T01:00Z'), 100, 50), bar(at('2026-11-19T01:00Z'), 98, 60)];
+  const chart = yahooChart(bars, { currentTradingPeriod: { regular: session('2026-11-20T01:00Z', '2026-11-20T05:30Z') } });
+  // 11/19 除息 5 元：之前的 K 線還原收盤價為 95
+  chart.chart.result[0].indicators.adjclose = [{ adjclose: [95, 98] }];
+  mockFetch(t, () => [200, chart]);
+  const result = await fetchStockCandles('tw', '0056', '1d', { now: at('2026-11-20T00:00Z') });
+  assert.equal(result.adjusted, true);
+  assert.deepEqual(result.candles.map(({ open, high, low, close, volume }) => [open, high, low, close, volume]), [
+    [99 * 0.95, 102 * 0.95, 98 * 0.95, 95, 50], [97, 100, 96, 98, 60],
+  ]);
+});
+
 test('4H 線由 1 小時 K 線依交易日開盤時間合併，去掉收盤時附加的 K 線，未走完的一根不算', async (t) => {
   // 台股 09:00～13:30：09、10、11、12 點合併為一根，13 點單獨一根（到 13:30 收盤）
   const day = (date) => [1, 2, 3, 4, 5].map((hour, i) => bar(at(`${date}T0${hour}:00Z`), 100 + i, 10 + i));
@@ -185,4 +200,76 @@ test('AUTO 美股：Most Actives 中股價 5 美元以上的股票依成交金�
   ] }] } }]);
   assert.deepEqual(await fetchAutoCandidates('us'), [{ symbol: 'AAPL' }, { symbol: 'NVDA' }, { symbol: 'BRK.B' }]);
   assert.equal(calls[0].url.searchParams.get('scrIds'), 'most_actives');
+});
+
+test('整理市場資料：最後一根已收盤 K 線太舊時視為停止更新；AUTO 只把趨勢向上的候選交給 AI', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const now = at('2026-11-20T00:05Z');
+  const day = 86_400_000;
+  // 每個交易對 100 根日線：UP 上漲、DOWN 下跌、OLD 在 10 天前停止更新
+  const rows = (pair) => Array.from({ length: 100 }, (_, i) => {
+    const time = (pair === 'OLDUSDT' ? now - 10 * day : now) - (100 - i) * day;
+    const close = pair === 'DOWNUSDT' ? 200 - i : 100 + i;
+    return [time, String(close), String(close + 1), String(close - 1), String(close), '10', time + day - 1, '0'];
+  });
+  mockFetch(t, (url) => {
+    if (url.pathname.endsWith('/ticker/24hr')) {
+      return [200, ['UPUSDT', 'DOWNUSDT'].map((symbol) => ({ symbol, quoteVolume: '1000', lastPrice: '100', highPrice: '110', lowPrice: '90' }))];
+    }
+    return [200, rows(url.searchParams.get('symbol'))];
+  });
+
+  const [explicit] = await prepareMarkets({ crypto: { auto: false, symbols: ['UP', 'OLD'], interval: '1d' } }, { now });
+  assert.deepEqual(explicit.items.map((item) => item.symbol), ['UP']);
+  assert.equal(explicit.loaded, 1);
+  assert.deepEqual(explicit.errors, [{ symbol: 'OLD', message: `最後一根已收盤 K 線為 ${new Date(now - 11 * day).toISOString().slice(0, 10)}，資料可能已停止更新` }]);
+
+  const [auto] = await prepareMarkets({ crypto: { auto: true, symbols: [], interval: '1d' } }, { now });
+  assert.deepEqual({ candidates: auto.candidates, loaded: auto.loaded, items: auto.items.map((item) => item.symbol), failure: auto.failure },
+    { candidates: 2, loaded: 2, items: ['UP'], failure: null });
+});
+
+test('可以放空的標的：虛擬貨幣取三家永續合約的聯集（其中一家失敗仍可使用），台股為融券限額大於 0 且未停止融券；美股無法確認', async (t) => {
+  mockFetch(t, (url) => {
+    if (url.hostname === 'fapi.binance.com') return [451, { msg: 'restricted location' }];
+    if (url.hostname === 'api.bybit.com') return [200, { retCode: 0, result: { list: [{ symbol: 'BTCUSDT' }, { symbol: 'ADAUSDT' }] } }];
+    if (url.hostname === 'api.bitget.com') return [200, { code: '00000', data: [{ symbol: 'NIGHTUSDT' }] }];
+    if (url.pathname.endsWith('/MI_MARGN')) {
+      return [200, [{ 股票代號: '2330', 融券限額: '6483092', 註記: ' ' }, { 股票代號: '1213', 融券限額: '0', 註記: 'OX' }, { 股票代號: '2002', 融券限額: '100', 註記: 'X' }]];
+    }
+    return [200, [{ SecuritiesCompanyCode: '6488', ShortSaleQuota: '132028' }, { SecuritiesCompanyCode: '8299', ShortSaleQuota: '0' }]];
+  });
+  assert.deepEqual([...await fetchShortableSymbols('crypto')].sort(), ['ADAUSDT', 'BTCUSDT', 'NIGHTUSDT']);
+  assert.deepEqual([...await fetchShortableSymbols('tw')].sort(), ['2330', '6488']);
+  assert.equal(await fetchShortableSymbols('us'), null);
+
+  t.mock.restoreAll();
+  mockFetch(t, () => [403, {}]);
+  assert.equal(await fetchShortableSymbols('crypto'), null, '全部失敗時無法確認');
+});
+
+test('可以做空時，AUTO 也把趨勢向下、而且能放空的候選交給 AI，並標示每個標的能否放空', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const now = at('2026-11-20T00:05Z');
+  const day = 86_400_000;
+  const rows = (pair) => Array.from({ length: 100 }, (_, i) => {
+    const time = now - (100 - i) * day;
+    const close = pair === 'UPUSDT' ? 100 + i : 200 - i;
+    return [time, String(close), String(close + 1), String(close - 1), String(close), '10', time + day - 1, '0'];
+  });
+  mockFetch(t, (url) => {
+    if (url.pathname.endsWith('/ticker/24hr')) {
+      return [200, ['UPUSDT', 'DOWNUSDT', 'NOPERPUSDT'].map((symbol) => ({ symbol, quoteVolume: '1000', lastPrice: '100', highPrice: '110', lowPrice: '90' }))];
+    }
+    // 只有 DOWNUSDT 有永續合約
+    if (url.hostname === 'fapi.binance.com') return [200, [{ symbol: 'DOWNUSDT' }]];
+    if (url.hostname === 'api.bybit.com' || url.hostname === 'api.bitget.com') return [403, {}];
+    return [200, rows(url.searchParams.get('symbol'))];
+  });
+  const [market] = await prepareMarkets({ crypto: { auto: true, symbols: [], interval: '1d', allowShort: true } }, { now });
+  assert.equal(market.allowShort, true);
+  assert.deepEqual(market.items.map((item) => [item.symbol, item.shortable]), [['UP', false], ['DOWN', true]], 'NOPERP 趨勢向下但無法放空，不交給 AI');
+
+  const [longOnly] = await prepareMarkets({ crypto: { auto: true, symbols: [], interval: '1d', allowShort: false } }, { now });
+  assert.deepEqual(longOnly.items.map((item) => [item.symbol, item.shortable]), [['UP', false]]);
 });

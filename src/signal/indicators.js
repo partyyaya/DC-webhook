@@ -4,7 +4,8 @@
  *   - MACD(12, 26, 9)：DIF = EMA12 − EMA26，訊號線 = DIF 的 EMA9，柱狀體 = DIF − 訊號線
  *   - RSI(14)、ATR(14)、ADX(14)（含 +DI、−DI）：Wilder 平滑（RMA）
  *   - 費波那契：近 FIB_LOOKBACK 根 K 線的最高點與最低點之間的回撤與延伸位
- *   - 成交量：最後一根與前 20 根平均的比值
+ *   - 成交量：最後一根與前 20 根平均的比值、近 20 根上漲日與下跌日的平均量、成交額（收盤價 × 成交量）
+ *   - 趨勢篩選：向上為收盤價高於 EMA50 且 EMA20 > EMA50，向下為收盤價低於 EMA50 且 EMA20 < EMA50（AUTO 先以此篩選候選）
  *
  * K 線格式：{ time, open, high, low, close, volume }，time 為開盤時間（毫秒）。
  * 尚無足夠資料計算的位置為 null。
@@ -19,6 +20,12 @@ export const FIB_EXTENSIONS = [1.272, 1.618];
 // MACD 交叉的回溯範圍
 const CROSS_LOOKBACK = 10;
 const VOLUME_PERIOD = 20;
+// EMA50 斜率：與幾根之前比較
+const SLOPE_LOOKBACK = 5;
+// 列出最近幾根的 RSI 與 MACD 柱狀體，供判斷背離
+const SERIES_LENGTH = 5;
+
+const average = (values) => (values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : null);
 
 /**
  * 從第一個非 null 的值開始，以前 period 個值的簡單平均起算，之後逐筆平滑。
@@ -190,26 +197,71 @@ export function analyzeCandles(candles) {
   const atrValues = atr(candles);
   const adxResult = adx(candles);
   const recent20 = candles.slice(-20);
-  const previousVolumes = candles.slice(-1 - VOLUME_PERIOD, -1).map((candle) => candle.volume);
-  const averageVolume = previousVolumes.reduce((sum, value) => sum + value, 0) / previousVolumes.length;
+  const previous = candles.slice(-1 - VOLUME_PERIOD, -1);
+  const averageVolume = average(previous.map((candle) => candle.volume));
+  // 近 20 根中，收盤上漲與下跌的 K 線各自的平均成交量
+  const changes = candles.slice(-VOLUME_PERIOD).map((candle, i, list) => ({ candle, prev: i > 0 ? list[i - 1] : candles[candles.length - VOLUME_PERIOD - 1] }));
+  const upVolumes = changes.filter(({ candle, prev }) => prev && candle.close > prev.close).map(({ candle }) => candle.volume);
+  const downVolumes = changes.filter(({ candle, prev }) => prev && candle.close < prev.close).map(({ candle }) => candle.volume);
+  const slopeBase = ema50[last - SLOPE_LOOKBACK];
 
   return {
     count: candles.length,
     last: candles[last],
     recent: candles.slice(-5),
-    ema: { ema20: ema20[last], ema50: ema50[last], ema200: ema200[last] },
+    ema: {
+      ema20: ema20[last],
+      ema50: ema50[last],
+      ema200: ema200[last],
+      // EMA50 與 SLOPE_LOOKBACK 根之前相比的變化（%）
+      ema50Slope: slopeBase ? ((ema50[last] - slopeBase) / slopeBase) * 100 : null,
+    },
     macd: {
       macd: macdResult.macd[last],
       signal: macdResult.signal[last],
       histogram: macdResult.histogram[last],
       prevHistogram: macdResult.histogram[last - 1],
+      recentHistogram: macdResult.histogram.slice(-SERIES_LENGTH),
       cross: lastCross(macdResult),
     },
-    rsi: { value: rsiValues[last], prev: rsiValues[last - 1] },
+    rsi: { value: rsiValues[last], prev: rsiValues[last - 1], recent: rsiValues.slice(-SERIES_LENGTH) },
     adx: { adx: adxResult.adx[last], prev: adxResult.adx[last - 1], plusDI: adxResult.plusDI[last], minusDI: adxResult.minusDI[last] },
     atr: atrValues[last],
-    volume: { last: candles[last].volume, average: averageVolume, ratio: averageVolume > 0 ? candles[last].volume / averageVolume : null },
+    volume: {
+      last: candles[last].volume,
+      average: averageVolume,
+      ratio: averageVolume > 0 ? candles[last].volume / averageVolume : null,
+      upAverage: average(upVolumes),
+      downAverage: average(downVolumes),
+    },
+    // 成交額（收盤價 × 成交量），以該市場的價格單位計算，用來判斷流動性
+    turnover: {
+      last: candles[last].close * candles[last].volume,
+      average: average(previous.map((candle) => candle.close * candle.volume)),
+    },
     range20: { high: Math.max(...recent20.map((candle) => candle.high)), low: Math.min(...recent20.map((candle) => candle.low)) },
     fibonacci: fibonacci(candles),
   };
+}
+
+/**
+ * 趨勢篩選：收盤價高於 EMA50，且 EMA20 > EMA50。AUTO 先以此篩選候選，只把趨勢向上的標的交給 AI。
+ *
+ * @param {object} snapshot analyzeCandles() 的結果
+ * @returns {boolean}
+ */
+export function isUptrend(snapshot) {
+  const { ema20, ema50 } = snapshot.ema;
+  return ema50 !== null && snapshot.last.close > ema50 && ema20 > ema50;
+}
+
+/**
+ * 趨勢向下：收盤價低於 EMA50，且 EMA20 < EMA50。可以做空時，AUTO 也把趨勢向下的候選交給 AI。
+ *
+ * @param {object} snapshot analyzeCandles() 的結果
+ * @returns {boolean}
+ */
+export function isDowntrend(snapshot) {
+  const { ema20, ema50 } = snapshot.ema;
+  return ema50 !== null && snapshot.last.close < ema50 && ema20 < ema50;
 }

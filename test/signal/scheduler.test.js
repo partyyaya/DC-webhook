@@ -54,6 +54,8 @@ globalThis.fetch = async (input, options = {}) => {
     });
     return new Response(JSON.stringify(rows));
   }
+  // 其他行情網站（例如永續合約清單）回覆空清單
+  if (url.hostname !== 'discord.com') return new Response('[]');
   const at = new RealDate(currentTime).toISOString();
   if (options.method === 'DELETE') {
     calls.push({ at, action: 'DELETE ' + url.pathname.split('/').at(-1) });

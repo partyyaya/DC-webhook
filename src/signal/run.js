@@ -27,11 +27,12 @@ function describeMarkets(markets) {
   }).join('、');
 }
 
-/** 紀錄輸出用的單一建議，例如「可以：進場 62000、止盈 65000、止損 60000」。 */
+/** 紀錄輸出用的單一建議，例如「做多（現價）：進場 62000、止盈 65000、止損 60000、風險報酬比 1:2.1」。 */
 function describeSignal(signal) {
   if (signal.action !== 'trade') return '觀望';
   const price = (value) => formatPrice(value, signal.price);
-  return `可以：進場 ${price(signal.entry)}、止盈 ${price(signal.takeProfit)}、止損 ${price(signal.stopLoss)}`;
+  return `${signal.direction === 'short' ? '做空' : '做多'}（${signal.entryType === 'limit' ? '限價' : '現價'}）：進場 ${price(signal.entry)}、止盈 ${price(signal.takeProfit)}、`
+    + `止損 ${price(signal.stopLoss)}、風險報酬比 1:${signal.riskReward.toFixed(1)}`;
 }
 
 export const { assertTargets, runDaily: runOnce } = createDailyDigest({
@@ -46,14 +47,21 @@ export const { assertTargets, runDaily: runOnce } = createDailyDigest({
     for (const market of plan) {
       const { name } = marketOf(market.key);
       if (market.failure) continue;
-      log(`[${name}] 取得 ${market.items.length} 個標的的資料${market.auto ? `（AUTO 候選 ${market.candidates} 個）` : ''}`);
+      log(market.auto
+        ? `[${name}] AUTO 候選 ${market.candidates} 個，取得 ${market.loaded} 個的資料，其中 ${market.items.length} 個${market.allowShort ? '趨勢明確' : '趨勢向上'}`
+        : `[${name}] 取得 ${market.loaded} 個標的的資料`);
     }
-    const total = plan.reduce((sum, market) => sum + market.items.length, 0);
-    if (total === 0) throw new Error('所有標的都無法取得行情資料，本次不發送（前一次的訊息保留在頻道上）');
+    if (plan.every((market) => market.loaded === 0)) throw new Error('所有標的都無法取得行情資料，本次不發送（前一次的訊息保留在頻道上）');
 
-    // 步驟 2：交給 AI 判斷是否做單
-    log(`以 ${aiLabel(config.ai.provider)} 判斷是否做單：共 ${total} 個標的，約需數分鐘…`);
-    const reply = await summarizeWithAi(buildSignalPrompt(plan, { now: to, timeZone }), { ...config.ai, schema: buildSignalSchema(plan) });
+    // 步驟 2：交給 AI 判斷是否做單；AUTO 的候選都沒有通過趨勢篩選時，不需要呼叫 AI
+    const total = plan.reduce((sum, market) => sum + market.items.length, 0);
+    let reply = '{}';
+    if (total > 0) {
+      log(`以 ${aiLabel(config.ai.provider)} 判斷是否做單：共 ${total} 個標的，約需數分鐘…`);
+      reply = await summarizeWithAi(buildSignalPrompt(plan, { now: to, timeZone }), { ...config.ai, schema: buildSignalSchema(plan) });
+    } else {
+      log('沒有需要交給 AI 判斷的標的（AUTO 的候選都沒有通過趨勢篩選）。');
+    }
     const results = parseSignals(reply, plan);
     for (const market of results) {
       const { name } = marketOf(market.key);

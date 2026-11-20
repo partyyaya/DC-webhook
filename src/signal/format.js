@@ -1,5 +1,5 @@
 /**
- * 組成 Discord 訊息：每個市場一則訊息，每個標的一張卡片（可以做單為綠色、觀望為灰色、無法取得資料為紅色），
+ * 組成 Discord 訊息：每個市場一則訊息，每個標的一張卡片（做多為綠色、做空為橘色、觀望為灰色、無法取得資料為紅色），
  * 最後一則訊息是免責聲明卡片。
  *
  * 訊息標題：
@@ -7,10 +7,12 @@
  *   -# 🕒 4H 線・💵 價格單位：美元（USDT 交易對）
  *
  * 卡片內容（每行以「圖示 小標題：」開頭，價位以程式碼格式凸顯）：
- *   🏷️ 標的：BTC，是否做單：🟢 可以
- *   💰 進場：62000，止盈：65000（+4.8%），止損：60000（-3.2%）
+ *   🏷️ 標的：BTC，是否做單：🟢 做多（做空為 🟠 做空）
+ *   💰 進場（現價）：62000，風險報酬比：1:2.1          （限價單顯示「進場（限價・待觸發）」）
+ *   🎯 止盈：65000（+4.8%），止損：60000（-3.2%）
  *   📊 原因：……
  *   📝 其他事項：若……，則直接撤單      （選填）
+ * 風險報酬比為扣除交易成本後的數值（signals.js）。
  * 可以做單時不顯示現價，避免與進場價混淆；觀望時不顯示進場、止盈、止損，現價顯示在卡片底部。
  * AUTO 沒有挑出任何標的時（找不到符合條件的標的，或市場不適合做單），顯示一張觀望卡片。
  */
@@ -30,8 +32,9 @@ export const DISCLAIMER_MESSAGE = {
 // AUTO 沒有挑出任何標的時顯示（AI 找不到符合條件的標的，或市場不適合做單）
 export const NO_PICK_TEXT = '目前沒有符合做單條件的標的，或市場不適合做單，建議觀望。';
 
-const COLORS = { trade: 0x2ecc71, wait: 0x95a5a6, error: 0xe74c3c };
-const ACTIONS = { trade: '🟢 **可以**', wait: '⚪ **觀望**' };
+const COLORS = { long: 0x2ecc71, short: 0xe67e22, wait: 0x95a5a6, error: 0xe74c3c };
+const ACTIONS = { long: '🟢 **做多**', short: '🟠 **做空**', wait: '⚪ **觀望**' };
+const ENTRY_TYPES = { market: '進場（現價）', limit: '進場（限價・待觸發）' };
 // 卡片內容的每一行以「圖示 小標題：」開頭
 const item = (icon, label, text) => `${icon} **${label}**：${text}`;
 // 一則 Discord 訊息最多 10 張卡片
@@ -52,7 +55,9 @@ export function buildDiscordMessages(results, { dateLabel }) {
 function buildMarketMessage(market, dateLabel) {
   const info = marketOf(market.key);
   const notes = [`🕒 ${INTERVALS[market.interval].label}`, `💵 價格單位：${info.unitNote}`];
-  if (market.auto && !market.failure) notes.push(`🤖 AUTO：由 AI 從${info.autoUniverse}的 ${market.candidates} 個標的中挑選最多 ${AUTO_MAX_PICKS} 個`);
+  if (market.auto && !market.failure) {
+    notes.push(`🤖 AUTO：從${info.autoUniverse}的 ${market.candidates} 個標的中篩選出${market.allowShort ? '趨勢明確' : '趨勢向上'}的 ${market.analyzed} 個，由 AI 挑選最多 ${AUTO_MAX_PICKS} 個`);
+  }
 
   const embeds = market.signals.map((signal) => signalEmbed(signal, info));
   if (market.failure) {
@@ -81,10 +86,14 @@ function signalEmbed(signal, info) {
   };
   const name = signal.name ? `${signal.symbol} ${truncate(signal.name, 20)}` : signal.symbol;
   const trade = signal.action === 'trade';
-  const lines = [`${item('🏷️', '標的', `**${name}**`)}，**是否做單**：${ACTIONS[signal.action]}`];
+  // 可以做單時依方向（做多／做空）顯示，觀望另外顯示
+  const kind = trade ? signal.direction : 'wait';
+  const lines = [`${item('🏷️', '標的', `**${name}**`)}，**是否做單**：${ACTIONS[kind]}`];
   if (trade) {
-    lines.push(`${item('💰', '進場', `\`${price(signal.entry)}\``)}，**止盈**：\`${price(signal.takeProfit)}\`（${percent(signal.takeProfit)}），`
-      + `**止損**：\`${price(signal.stopLoss)}\`（${percent(signal.stopLoss)}）`);
+    lines.push(
+      `${item('💰', ENTRY_TYPES[signal.entryType], `\`${price(signal.entry)}\``)}，**風險報酬比**：1:${signal.riskReward.toFixed(1)}`,
+      `${item('🎯', '止盈', `\`${price(signal.takeProfit)}\`（${percent(signal.takeProfit)}）`)}，**止損**：\`${price(signal.stopLoss)}\`（${percent(signal.stopLoss)}）`,
+    );
   }
   lines.push(item('📊', '原因', signal.reason));
   if (signal.note) lines.push(item('📝', '其他事項', signal.note));
@@ -92,7 +101,7 @@ function signalEmbed(signal, info) {
   const source = `資料來源：${signal.source} ${signal.ticker}`;
   return {
     description: lines.join('\n'),
-    color: COLORS[signal.action],
+    color: COLORS[kind],
     footer: { text: trade ? source : `現價 ${price(signal.price)} ${info.currency}・${source}` },
   };
 }

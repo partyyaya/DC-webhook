@@ -69,6 +69,13 @@ export function text(value, fallback, where) {
   return value;
 }
 
+/** 是非欄位（true／false）：未填寫時使用預設值。 */
+export function boolean(value, fallback, where) {
+  if (value === undefined) return fallback;
+  if (typeof value !== 'boolean') throw new Error(`${where} 必須是 true 或 false，目前為「${value}」`);
+  return value;
+}
+
 /** 整數欄位：未填寫時使用預設值，超出範圍時拋錯。 */
 export function integer(value, fallback, where, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
   if (value === undefined) return fallback;
