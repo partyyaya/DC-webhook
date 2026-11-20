@@ -121,7 +121,7 @@ test('取得行情並計算指標，由 AI 判斷是否做單；每個市場一�
   const [crypto, tw, us] = posts;
   assert.equal(crypto.embeds[0].description, [
     '🏷️ **標的**：**BTC**，**是否做單**：🟢 **做多**', '💰 **進場（現價）**：`97.2`，**風險報酬比**：1:1.9',
-    '🎯 **止盈**：`106`（+9.1%），**止損**：`93`（-4.3%）', '📊 **原因**：BTC 站上均線', '📝 **其他事項**：若跌破 93，則直接撤單',
+    '🎯 **止盈**：`106`（+9.1%），**止損**：`93`（-4.3%）', '📊 **原因**：BTC 站上均線', '📝 **注意事項**：若跌破 93，則直接撤單',
   ].join('\n'));
   assert.match(crypto.embeds[1].description, /^🏷️ \*\*標的\*\*：\*\*ETH\*\*\n❌ \*\*原因\*\*：無法取得行情資料，本次略過：無法取得 ETHUSDT 的 K 線（Binance：HTTP 400（Invalid symbol\.）；Bybit：Not supported symbols；Bitget：HTTP 400（Parameter ETHUSDT does not exist））/);
   assert.match(tw.content, /AUTO：從上市櫃普通股中前一交易日成交金額最大的 1 個標的中篩選出趨勢向上的 1 個，由 AI 挑選最多 3 個/);

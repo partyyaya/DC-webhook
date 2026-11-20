@@ -11,7 +11,7 @@
  *   💰 進場（現價）：62000，風險報酬比：1:2.1          （限價單顯示「進場（限價・待觸發）」）
  *   🎯 止盈：65000（+4.8%），止損：60000（-3.2%）
  *   📊 原因：……
- *   📝 其他事項：若……，則直接撤單      （選填）
+ *   📝 注意事項：若……，則直接撤單      （選填）
  * 風險報酬比為扣除交易成本後的數值（signals.js）。
  * 可以做單時不顯示現價，避免與進場價混淆；觀望時不顯示進場、止盈、止損，現價顯示在卡片底部。
  * AUTO 沒有挑出任何標的時（找不到符合條件的標的，或市場不適合做單），顯示一張觀望卡片。
@@ -96,7 +96,7 @@ function signalEmbed(signal, info) {
     );
   }
   lines.push(item('📊', '原因', signal.reason));
-  if (signal.note) lines.push(item('📝', '其他事項', signal.note));
+  if (signal.note) lines.push(item('📝', '注意事項', signal.note));
   // 可以做單時只顯示進場價，不顯示現價，避免兩個價位混淆；觀望時在卡片底部顯示現價
   const source = `資料來源：${signal.source} ${signal.ticker}`;
   return {

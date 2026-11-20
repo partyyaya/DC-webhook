@@ -18,7 +18,7 @@ import { truncate } from '../shared/news.js';
 import { formatDateInZone, formatInZone } from '../shared/schedule.js';
 import { normalizeSymbol } from '../shared/symbols.js';
 
-// 原因與其他事項的長度上限：確保一則訊息放滿 10 張卡片時，文字總量仍在 Discord 的 6000 字限制內
+// 原因與注意事項的長度上限：確保一則訊息放滿 10 張卡片時，文字總量仍在 Discord 的 6000 字限制內
 export const REASON_MAX = 260;
 export const NOTE_MAX = 100;
 // 限價進場價與現價最多相差的比例，超過視為不合理
@@ -287,8 +287,8 @@ export function buildSignalPrompt(plan, { now, timeZone }) {
       : '- entry、takeProfit、stopLoss：必須符合「止損 < 進場 < 止盈」，小數位數與該標的的資料相同；價格單位與該市場相同：虛擬貨幣與美股為美元，台股為新台幣。觀望時都填 0。',
     '- reason：用繁體中文（台灣用語），依趨勢、動能與量能、價位的順序說明判斷原因，引用具體的指標數值，80～200 字。',
     anyShort
-      ? '- note：其他事項，不超過 60 字。可以做單時寫出失效條件，例如做多「若跌破 X，則直接撤單」、做空「若站上 X，則直接撤單」；限價單可加上取消條件，例如「5 個交易日內未成交則取消」。觀望時可寫需要留意的關鍵價位；沒有就填空字串。'
-      : '- note：其他事項，不超過 60 字。可以做單時寫出失效條件，例如「若跌破 X，則直接撤單」；限價單可加上取消條件，例如「5 個交易日內未成交則取消」。觀望時可寫需要留意的關鍵價位；沒有就填空字串。',
+      ? '- note：注意事項，不超過 60 字。可以做單時寫出失效條件，例如做多「若跌破 X，則直接撤單」、做空「若站上 X，則直接撤單」；限價單可加上取消條件，例如「5 個交易日內未成交則取消」。觀望時可寫需要留意的關鍵價位；沒有就填空字串。'
+      : '- note：注意事項，不超過 60 字。可以做單時寫出失效條件，例如「若跌破 X，則直接撤單」；限價單可加上取消條件，例如「5 個交易日內未成交則取消」。觀望時可寫需要留意的關鍵價位；沒有就填空字串。',
     '',
     '以下依市場列出行情資料：',
     '',
@@ -302,7 +302,7 @@ export function buildSignalPrompt(plan, { now, timeZone }) {
  *   - 指定代號的市場：依設定的順序，每個標的一筆；AI 沒有回覆的標的顯示為觀望。
  *   - AUTO 的市場：只採用候選中、action 為 trade 的標的，依 AI 的順序最多 AUTO_MAX_PICKS 個。
  *   - 可以做單時由程式檢查能否做空與價位（見 checkSignal()），不通過時改為觀望（AUTO 則捨棄），並在原因中註明。
- *   - 原因與其他事項限制長度。
+ *   - 原因與注意事項限制長度。
  *
  * @param {string} text AI 的回覆
  * @param {object[]} plan prepareMarkets() 的結果
