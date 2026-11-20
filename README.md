@@ -2,7 +2,7 @@
 
 提供共用的 Discord Webhook 發文管理、AI 摘要執行器（Codex 或 Claude）、排程時間計算與訊息操作紀錄。各主題的公告來源、設定、指令與規則放在各自的文件中。
 
-**主題文件：[Artale 通知](docs/artale.md) · [Crypto 每日新聞](docs/crypto.md)**
+**主題文件：[Artale 通知](docs/artale.md) · [Crypto 每日新聞](docs/crypto.md) · [股票每日新聞](docs/stock.md) · [技術指標做單建議](docs/signal.md)**
 
 ## 目錄
 
@@ -44,7 +44,7 @@ claude auth login
 | 檔案 | 內容 |
 | --- | --- |
 | `env/.env.shared` | 所有主題共用的 AI 設定（使用的 AI、執行檔、模型、API key、摘要逾時），環境變數格式 |
-| `env/artale.js`、`env/crypto.js` | 各主題的**所有設定**：Webhook、排程、內容、名稱與頭像變更提醒、紀錄位置。JS 檔，可以直接寫註解 |
+| `env/artale.js`、`env/crypto.js`、`env/stock.js`、`env/signal.js` | 各主題的**所有設定**：Webhook、排程、內容、名稱與頭像變更提醒、紀錄位置。JS 檔，可以直接寫註解 |
 
 共用 AI 設定可先複製範例 [env/.env.shared.example](env/.env.shared.example)；若使用 Codex 並沿用預設值及 CLI 登入資訊，可省略正式共用檔：
 
@@ -57,6 +57,8 @@ cp env/.env.shared.example env/.env.shared
 ```bash
 cp env/artale.example.js env/artale.js
 cp env/crypto.example.js env/crypto.js
+cp env/stock.example.js env/stock.js
+cp env/signal.example.js env/signal.js
 ```
 
 主題設定檔以 `export default` 匯出設定物件；除了 `webhooks` 以外都是選填，欄位名稱寫錯或型別不符時，程式會指出檔案與欄位並停止。共用檔只讀取 AI 等共用設定，系統環境變數優先，包含已設定的空值；系統環境變數不會覆寫主題設定。程式不讀取根目錄舊 `.env`；舊版的 `env/.env.artale`、`env/.env.crypto` 已停用，仍存在時會提醒搬到新的設定檔。
@@ -67,7 +69,7 @@ cp env/crypto.example.js env/crypto.js
 
 各主題使用自己的 Webhook、排程與去重紀錄設定。具體欄位、預設值及啟動指令請查看該主題文件；共用設定不決定任何主題的輪詢時間。修改設定後，需重新啟動對應的常駐程式。
 
-不同主題的常駐排程是各自獨立的程式，可以在不同終端機同時執行，例如 `npm run artale:schedule` 與 `npm run crypto:schedule`。同一個主題的排程不要同時開兩份，否則會重複發送。
+不同主題的常駐排程是各自獨立的程式，可以在不同終端機同時執行，例如 `npm run artale:schedule`、`npm run crypto:schedule`、`npm run stock:schedule` 與 `npm run signal:schedule`。同一個主題的排程不要同時開兩份，否則會重複發送。
 
 ## 共用設定
 
@@ -111,7 +113,7 @@ cp env/crypto.example.js env/crypto.js
 npm run webhook -- --help
 ```
 
-也可執行 `node src/webhook.js <操作> ...`。支援的來源名稱為 `artale`、`crypto`。
+也可執行 `node src/webhook.js <操作> ...`。支援的來源名稱為 `artale`、`crypto`、`stock`、`signal`。
 
 ### 選擇設定來源
 
@@ -185,7 +187,7 @@ Webhook 的名稱與頭像可以被伺服器管理員在 Discord 頻道設定中
 - 沒有提示詞時，直接發送固定文字（`avatarMessage`、`nameMessage`）。
 - 三者都是空的（預設）時不發送。兩者同時被更換時發送兩行：第一行頭像、第二行名稱。
 
-各主題、各 Webhook 的記錄分開，詳細規則見 [Artale](docs/artale.md#webhook-名稱與頭像變更提醒)、[Crypto](docs/crypto.md#webhook-名稱與頭像變更提醒) 文件。
+各主題、各 Webhook 的記錄分開，詳細規則見 [Artale](docs/artale.md#webhook-名稱與頭像變更提醒)、[Crypto](docs/crypto.md#webhook-名稱與頭像變更提醒) 文件；股票與技術指標的規則與 Crypto 相同。
 
 ## 問題排查
 
@@ -209,7 +211,7 @@ Webhook 的名稱與頭像可以被伺服器管理員在 Discord 頻道設定中
 npm test
 ```
 
-`src/shared/` 不依賴特定主題；各主題自行處理資料取得、篩選、摘要規則、排版、去重與執行流程，再呼叫共用工具。
+`src/shared/` 不依賴特定主題；各主題自行處理資料取得、篩選、摘要規則與排版，再呼叫共用工具。定期發送並取代前一次訊息的主題（Crypto、股票、技術指標）共用同一套發送流程與紀錄（`daily-digest.js`、`digest-state.js`），只需提供自己的內容產生方式與排版；Crypto 與股票每天發送一次，共用 `digest-scheduler.js` 的排程，技術指標則與 Artale 一樣在時段內每隔固定分鐘執行。
 
 | 共用功能 | 位置 |
 | --- | --- |
@@ -219,6 +221,11 @@ npm test
 | Codex CLI 執行器 | `src/shared/codex.js` |
 | Claude Code CLI 執行器 | `src/shared/claude.js` |
 | 外部 CLI 執行、逾時與錯誤處理 | `src/shared/process.js` |
+| 發送流程：產生內容 → 刪除前一次的訊息 → 發送 → 記錄 | `src/shared/daily-digest.js` |
+| 每天一次的常駐排程、補發與重試 | `src/shared/digest-scheduler.js` |
+| 每日紀錄（依 Webhook 分開） | `src/shared/digest-state.js` |
+| 新聞欄位 Schema、整理、依優先清單挑選與卡片排版 | `src/shared/news.js` |
+| 虛擬貨幣、台股、美股的代號格式規則 | `src/shared/symbols.js` |
 | 排程設定與時間計算 | `src/shared/schedule.js` |
 | 分來源環境檔載入與專案路徑 | `src/shared/env.js` |
 | 紀錄輸出 | `src/shared/log.js` |
@@ -247,6 +254,8 @@ npm test
 │   ├── shared/         # 共用 Discord、AI、排程與環境工具
 │   ├── webhook.js      # 共用手動發文管理入口
 │   ├── artale/         # Artale 公告通知，詳見專屬文件
-│   └── crypto/         # 每日美國經濟與虛擬貨幣新聞，詳見專屬文件
+│   ├── crypto/         # 每日美國經濟與虛擬貨幣新聞，詳見專屬文件
+│   ├── stock/          # 每日台股與美股新聞，詳見專屬文件
+│   └── signal/         # 每日技術指標做單建議，詳見專屬文件
 └── test/               # 共用與各主題測試
 ```

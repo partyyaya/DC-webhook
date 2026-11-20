@@ -70,6 +70,7 @@ try {
     interval: config.schedule.intervalMinutes, timeZone: config.schedule.timeZone, timeout: config.ai.timeoutMs,
     ...(config.newsCategories ? { categories: config.newsCategories } : {}),
     ...(config.news ? { news: config.news, webSearch: config.ai.webSearch } : {}),
+    ...(config.markets ? { markets: config.markets, webSearch: config.ai.webSearch } : {}),
     ai: { provider: config.ai.provider, bin: config.ai.bin, model: config.ai.model, timeoutMs: config.ai.timeoutMs },
   }));
 } catch (err) { console.error(err.message); process.exitCode = 1; }
@@ -186,6 +187,114 @@ test('Crypto 設定錯誤明確指出設定檔與欄位名稱', async (t) => {
   for (const [content, name] of cases) {
     await assert.rejects(readConfig(t, 'crypto', content), (err) => {
       assert.ok(err.stderr.includes('crypto.js'), err.stderr);
+      assert.ok(err.stderr.includes(name), `${name}：${err.stderr}`);
+      return true;
+    });
+  }
+});
+
+test('股票設定檔為空時使用預設值：每天 08:00、台灣時間、台股與美股各 3 則、開放網路搜尋', async (t) => {
+  assert.deepEqual(await readConfig(t, 'stock', {}), {
+    targets: [], state: path.join(ROOT, 'data/stock/state.json'), posts: path.join(ROOT, 'data/stock/discord-messages.jsonl'),
+    days: [0, 1, 2, 3, 4, 5, 6], start: 480, end: 480, interval: 1440, timeZone: 'Asia/Taipei', timeout: 600000,
+    news: { twStocks: ['2330', '2317', '2454'], usStocks: ['NVDA', 'AAPL', 'MSFT'], twCount: 3, usCount: 3 }, webSearch: true,
+  });
+});
+
+test('股票設定檔的 Webhook、排程、股票清單、篇數與逾時設定；清單可寫數字、逗號分隔文字或留空', async (t) => {
+  const config = await readConfig(t, 'stock', `
+export default {
+  webhooks: [{ name: '股票', url: '${hook('888')}', webhookProfile: { personaPrompt: '分析師' } }],
+  schedule: { days: '1-5', time: '07:30', timeZone: 'UTC' },
+  news: { twStocks: [2330, '0050', '6488.TWO'], usStocks: 'aapl, brk-b', twCount: 5, usCount: 0 },
+  aiTimeoutMs: 120000,
+  files: { state: 'data/stock/custom-state.json', discordMessages: 'data/stock/custom-posts.jsonl' },
+};`);
+  assert.deepEqual(config, {
+    targets: [{ name: '股票', webhookId: '888', webhookProfile: { ...emptyProfile('stock', '888'), personaPrompt: '分析師' } }],
+    state: path.join(ROOT, 'data/stock/custom-state.json'), posts: path.join(ROOT, 'data/stock/custom-posts.jsonl'),
+    days: [1, 2, 3, 4, 5], start: 450, end: 450, interval: 1440, timeZone: 'UTC', timeout: 120000,
+    news: { twStocks: ['2330', '0050', '6488'], usStocks: ['AAPL', 'BRK.B'], twCount: 5, usCount: 0 }, webSearch: true,
+  });
+  assert.deepEqual((await readConfig(t, 'stock', { news: { twStocks: [], usStocks: '' } })).news,
+    { twStocks: [], usStocks: [], twCount: 3, usCount: 3 });
+});
+
+test('股票設定錯誤明確指出設定檔與欄位名稱', async (t) => {
+  const cases = [
+    [{ news: { twCount: 0, usCount: 0 } }, 'twCount 與 usCount 不能都是 0'],
+    [{ news: { twCount: 11 } }, 'news.twCount 必須是 0～10'],
+    [{ news: { usCount: -1 } }, 'news.usCount 必須是 0～10'],
+    [{ news: { twStocks: ['TSMC'] } }, 'news.twStocks 格式錯誤'],
+    [{ news: { twStocks: [50] } }, '0 開頭的代號（例如 0050）請加引號'],
+    [{ news: { usStocks: ['蘋果'] } }, 'news.usStocks 格式錯誤'],
+    [{ news: { stocks: ['2330'] } }, 'news 有不支援的欄位：stocks'],
+    [{ codexTimeoutMs: 1000 }, '不支援的欄位：codexTimeoutMs'],
+    [{ schedule: { time: '8點' } }, 'schedule.time'],
+  ];
+  for (const [content, name] of cases) {
+    await assert.rejects(readConfig(t, 'stock', content), (err) => {
+      assert.ok(err.stderr.includes('stock.js'), err.stderr);
+      assert.ok(err.stderr.includes(name), `${name}：${err.stderr}`);
+      return true;
+    });
+  }
+});
+
+test('技術指標設定檔為空時使用預設值：每天 09:10～22:40 每 60 分鐘、台灣時間、三個市場各 2 個代號的日線、不使用網路搜尋', async (t) => {
+  const daily = (symbols) => ({ auto: false, symbols, interval: '1d' });
+  assert.deepEqual(await readConfig(t, 'signal', {}), {
+    targets: [], state: path.join(ROOT, 'data/signal/state.json'), posts: path.join(ROOT, 'data/signal/discord-messages.jsonl'),
+    days: [0, 1, 2, 3, 4, 5, 6], start: 550, end: 1360, interval: 60, timeZone: 'Asia/Taipei', timeout: 600000,
+    markets: { crypto: daily(['BTC', 'ETH']), tw: daily(['2330', '2345']), us: daily(['NVDA', 'AAPL']) }, webSearch: false,
+  });
+});
+
+test('技術指標設定檔的 Webhook、排程（開始、結束時間與執行頻率）、市場與逾時設定；代號可寫 AUTO、逗號分隔文字或留空（不分析）', async (t) => {
+  const config = await readConfig(t, 'signal', `
+export default {
+  webhooks: [{ name: '交易', url: '${hook('999')}' }],
+  schedule: { days: '1-5', start: '09:00', end: '21:00', intervalMinutes: 60, timeZone: 'UTC' },
+  markets: {
+    crypto: { symbols: 'btc, ETHUSDT' },
+    tw: { symbols: 'auto' },
+    us: { symbols: [] },
+  },
+  aiTimeoutMs: 120000,
+  files: { state: 'data/signal/custom-state.json', discordMessages: 'data/signal/custom-posts.jsonl' },
+};`);
+  assert.deepEqual(config, {
+    targets: [{ name: '交易', webhookId: '999', webhookProfile: emptyProfile('signal', '999') }],
+    state: path.join(ROOT, 'data/signal/custom-state.json'), posts: path.join(ROOT, 'data/signal/custom-posts.jsonl'),
+    days: [1, 2, 3, 4, 5], start: 540, end: 1260, interval: 60, timeZone: 'UTC', timeout: 120000,
+    markets: {
+      crypto: { auto: false, symbols: ['BTC', 'ETH'], interval: '1d' },
+      tw: { auto: true, symbols: [], interval: '1d' },
+      us: { auto: false, symbols: [], interval: '1d' },
+    },
+    webSearch: false,
+  });
+});
+
+test('技術指標設定錯誤明確指出設定檔與欄位名稱', async (t) => {
+  const none = { symbols: [] };
+  const cases = [
+    [{ markets: { crypto: none, tw: none, us: none } }, 'markets 至少要有一個市場的 symbols 填寫代號或 AUTO'],
+    [{ markets: { crypto: { symbols: ['BTC', 'AUTO'] } } }, 'markets.crypto.symbols 填 AUTO 時不能再加其他代號'],
+    [{ markets: { tw: { symbols: [50] } } }, '0 開頭的代號（例如 0050）請加引號'],
+    [{ markets: { us: { symbols: ['蘋果'] } } }, 'markets.us.symbols 格式錯誤'],
+    [{ markets: { us: { symbols: ['NVDA'], interval: '4h' } } }, 'markets.us 有不支援的欄位：interval'],
+    [{ markets: { crypto: 'AUTO' } }, 'markets.crypto 必須是物件'],
+    [{ markets: { gold: none } }, 'markets 有不支援的欄位：gold'],
+    [{ markets: { crypto: { symbol: ['BTC'] } } }, 'markets.crypto 有不支援的欄位：symbol'],
+    [{ schedule: { time: '08:05' } }, 'schedule 有不支援的欄位：time'],
+    [{ schedule: { start: '8點' } }, 'schedule.start'],
+    [{ schedule: { start: '21:00', end: '09:00' } }, '目前不支援跨越午夜的時段'],
+    [{ schedule: { intervalMinutes: 0 } }, 'schedule.intervalMinutes 必須是 1 以上的整數'],
+  ];
+  for (const [content, name] of cases) {
+    await assert.rejects(readConfig(t, 'signal', content), (err) => {
+      assert.ok(err.stderr.includes('signal.js'), err.stderr);
       assert.ok(err.stderr.includes(name), `${name}：${err.stderr}`);
       return true;
     });

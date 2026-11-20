@@ -1,7 +1,7 @@
 {
   "name": "dcwebhook",
   "version": "1.0.0",
-  "description": "定時檢查 Artale 官方公告，並每日整理美國經濟與虛擬貨幣新聞，以 Codex CLI 產生繁體中文摘要後發送到 Discord Webhook",
+  "description": "定時檢查 Artale 官方公告、每日整理美國經濟、虛擬貨幣與台美股新聞，並以技術指標分析虛擬貨幣與台美股的做單建議，由 AI（Codex 或 Claude）產生繁體中文內容後發送到 Discord Webhook",
   "private": true,
   "type": "module",
   "engines": {
@@ -16,6 +16,14 @@
     "crypto:preview": "node src/crypto/index.js --dry-run",
     "crypto:schedule": "node src/crypto/scheduler.js",
     "crypto:webhook": "node src/crypto/webhook.js",
+    "stock": "node src/stock/index.js",
+    "stock:preview": "node src/stock/index.js --dry-run",
+    "stock:schedule": "node src/stock/scheduler.js",
+    "stock:webhook": "node src/stock/webhook.js",
+    "signal": "node src/signal/index.js",
+    "signal:preview": "node src/signal/index.js --dry-run",
+    "signal:schedule": "node src/signal/scheduler.js",
+    "signal:webhook": "node src/signal/webhook.js",
     "webhook": "node src/webhook.js",
     "test": "node --test"
   }

@@ -8,10 +8,10 @@
  *     篇數少於幣種數量時依幣種順序只取前幾個；還有剩餘名額時只放重要新聞，不足寧缺勿濫
  * 篇數與優先幣種由 config.js 讀取後傳入；想調整撰寫規則，修改 buildNewsPrompt() 即可。
  */
+import { newsItemSchema, normalizeNewsItem, selectByPriority } from '../shared/news.js';
 import { formatInZone } from '../shared/schedule.js';
 
-// 每類新聞最多篇數：每個分類發成一則 Discord 訊息，一則訊息最多 10 張卡片
-export const MAX_NEWS_COUNT = 10;
+export { MAX_NEWS_COUNT } from '../shared/news.js';
 
 // 常見幣種的中文或全名，寫進提示詞幫助 AI 辨識；不在表內的幣種只寫代號
 const COIN_NAMES = {
@@ -48,25 +48,12 @@ export function parseCoins(text, name = 'news.priorityCoins') {
   return [...new Set(coins)];
 }
 
-// 每則新聞共用的欄位
-const ITEM_PROPERTIES = {
-  title: { type: 'string' },
-  summary: { type: 'string' },
-  source: { type: 'string' },
-  url: { type: 'string' },
-  publishedAt: { type: 'string' },
-};
-const newsItem = (extra = {}) => {
-  const properties = { ...ITEM_PROPERTIES, ...extra };
-  return { type: 'object', properties, required: Object.keys(properties), additionalProperties: false };
-};
-
 // 新聞資料的 JSON 格式（JSON Schema），要求 AI 的回覆必須符合
 export const NEWS_SCHEMA = {
   type: 'object',
   properties: {
-    economy: { type: 'array', items: newsItem() },
-    crypto: { type: 'array', items: newsItem({ coins: { type: 'array', items: { type: 'string' } } }) },
+    economy: { type: 'array', items: newsItemSchema() },
+    crypto: { type: 'array', items: newsItemSchema({ coins: { type: 'array', items: { type: 'string' } } }) },
   },
   required: ['economy', 'crypto'],
   additionalProperties: false,
@@ -177,27 +164,8 @@ export function parseNews(text, { economyCount, coinCount, priorityCoins }) {
       return true;
     });
 
-  // 順位：涉及的幣種中，在優先清單裡最前面的位置；都不在清單內則排最後
-  const rank = (item) => Math.min(...item.coins.map((coin) => priorityCoins.indexOf(coin)).filter((index) => index >= 0), priorityCoins.length);
-  // 代表幣種：涉及的幣種中最優先的一個
-  const mainCoin = (item) => priorityCoins[rank(item)];
   const economy = clean(data.economy, false).slice(0, economyCount);
-  const sorted = clean(data.crypto, true).sort((a, b) => rank(a) - rank(b));
-
-  // 1. 依幣種順序，每個優先幣種先選 1 則，篇數用完就停止
-  const picked = new Set();
-  for (const coin of priorityCoins) {
-    if (picked.size >= coinCount) break;
-    const available = sorted.filter((item) => !picked.has(item));
-    const choice = available.find((item) => mainCoin(item) === coin) ?? available.find((item) => item.coins.includes(coin));
-    if (choice) picked.add(choice);
-  }
-  // 2. 還有名額時，依排列順序補上其他新聞
-  for (const item of sorted) {
-    if (picked.size >= coinCount) break;
-    picked.add(item);
-  }
-  const crypto = sorted.filter((item) => picked.has(item));
+  const crypto = selectByPriority(clean(data.crypto, true), { priority: priorityCoins, count: coinCount, codesOf: (item) => item.coins });
 
   if (economy.length === 0 && crypto.length === 0) {
     throw new Error('AI 沒有找到任何符合時間範圍的新聞');
@@ -206,25 +174,15 @@ export function parseNews(text, { economyCount, coinCount, priorityCoins }) {
 }
 
 /**
- * 整理單則新聞：去除多餘空白並限制長度；標題為空或網址無效時回傳 null。
- * 長度上限確保一則訊息放滿 10 張卡片時，文字總量仍在 Discord 的 6000 字限制內。
+ * 整理單則新聞：共用欄位見 shared/news.js 的 normalizeNewsItem()；標題為空或網址無效時回傳 null。
  *
  * @param {object} item AI 回覆的單則新聞
  * @param {boolean} withCoins 是否整理 coins 欄位（虛擬貨幣新聞）
  * @returns {object | null}
  */
 function normalizeItem(item, withCoins) {
-  const text = (value, max) => (typeof value === 'string' ? truncate(value.replace(/\s+/g, ' ').trim(), max) : '');
-  const title = text(item?.title, 100);
-  const url = typeof item?.url === 'string' ? item.url.trim() : '';
-  if (!title || !isHttpUrl(url)) return null;
-  const news = {
-    title,
-    summary: text(item.summary, 300),
-    source: text(item.source, 50),
-    url,
-    publishedAt: text(item.publishedAt, 30),
-  };
+  const news = normalizeNewsItem(item);
+  if (!news) return null;
   if (withCoins) {
     const coins = (Array.isArray(item.coins) ? item.coins : [])
       .filter((coin) => typeof coin === 'string' && coin.trim())
@@ -232,18 +190,4 @@ function normalizeItem(item, withCoins) {
     news.coins = [...new Set(coins)];
   }
   return news;
-}
-
-/** 確認是 http(s) 網址，避免把無效或其他協定的連結放進 Discord 卡片。 */
-function isHttpUrl(value) {
-  try {
-    return ['http:', 'https:'].includes(new URL(value).protocol);
-  } catch {
-    return false;
-  }
-}
-
-/** 超過長度時截斷並加上「…」。 */
-export function truncate(value, max) {
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }

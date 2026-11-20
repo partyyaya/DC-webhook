@@ -1,5 +1,5 @@
 /**
- * 每日新聞紀錄模組：讀寫紀錄檔（預設 data/crypto/state.json）。
+ * 每日新聞紀錄模組（Crypto、股票等每日新聞主題共用）：讀寫紀錄檔（預設 data/<主題>/state.json）。
  *
  * 紀錄檔格式（依 Webhook ID 分開記錄，每個 Webhook 只能刪除自己發送的訊息）：
  *   { "targets": { "<Webhook ID>": { "completedDate": "2026-11-18", "messageIds": ["123", ...] } } }
@@ -7,7 +7,7 @@
  *   - messageIds：該 Webhook 目前留在 Discord 上的新聞訊息 ID，下次發送前會先刪除。
  *     每刪除或發送一則就立即更新，中途失敗時重試也能刪掉已發出的部分。
  *
- * 舊版只支援單一 Webhook 的格式 { completedDate, messageIds } 會以 legacy 欄位回傳，由 run.js 依發文紀錄
+ * 舊版只支援單一 Webhook 的格式 { completedDate, messageIds } 會以 legacy 欄位回傳，由 daily-digest.js 依發文紀錄
  * 找出原本的 Webhook 後轉成新格式。
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';

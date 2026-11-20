@@ -20,7 +20,7 @@ export const WEBHOOK_HELP = `用法：node src/webhook.js <create|edit|delete|li
   list                                      查看本機發文紀錄與訊息 ID
 
 共用選項：
-  --source NAME       使用 artale 或 crypto 設定檔（env/<主題>.js）的 Webhook 與紀錄設定
+  --source NAME       使用 ${SOURCES.join('、')} 其中一個主題設定檔（env/<主題>.js）的 Webhook 與紀錄設定
   --webhook URL       改用指定 Webhook；未選來源時必填
   --webhook-id ID     來源設定了多個 Webhook 時，指定要使用的 Webhook ID（可用 list 查看）
   --thread-id ID      訊息所在的討論串 ID（討論串訊息需提供）
@@ -84,7 +84,7 @@ export async function runWebhookCommand(args, {
     return;
   }
   const source = values.source ?? boundSource;
-  if (source !== undefined && !SOURCES.includes(source)) throw new Error(`--source 請使用 ${SOURCES.join(' 或 ')}`);
+  if (source !== undefined && !SOURCES.includes(source)) throw new Error(`--source 請使用 ${SOURCES.join('、')} 其中一個`);
   if (boundSource && source !== boundSource) throw new Error(`此指令固定使用 ${boundSource}，不能切換其他來源`);
   const [action] = positionals;
   if (positionals.length !== 1 || !['create', 'edit', 'delete', 'list'].includes(action)) {

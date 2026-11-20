@@ -329,7 +329,7 @@ data/crypto/
 | 搜尋與撰寫規則 | `src/crypto/news.js` 的 `buildNewsPrompt()` |
 | 提示詞中幣種的中文名稱、全名對照 | `src/crypto/news.js` 的 `COIN_NAMES`、`COIN_ALIASES` |
 | 訊息標題、卡片顏色與版面 | `src/crypto/format.js` |
-| 重試間隔與每日次數 | `src/crypto/scheduler.js` 的 `RETRY_MINUTES`、`MAX_ATTEMPTS_PER_DAY` |
+| 重試間隔與每日次數（與股票共用） | `src/shared/digest-scheduler.js` 的 `RETRY_MINUTES`、`MAX_ATTEMPTS_PER_DAY` |
 
 ### Crypto 模組位置
 
@@ -337,8 +337,8 @@ data/crypto/
 | --- | --- |
 | 單次執行、常駐排程、手動發文入口 | `src/crypto/index.js`、`scheduler.js`、`webhook.js` |
 | Crypto 設定 | `src/crypto/config.js` |
-| 主流程（搜尋 → 刪除 → 發送 → 記錄） | `src/crypto/run.js` |
-| 每日新聞紀錄（依 Webhook 分開） | `src/crypto/state.js` |
+| 新聞搜尋與整理 | `src/crypto/run.js`、`news.js` |
+| 每日流程（刪除 → 發送 → 記錄）、排程與紀錄（與股票共用；流程與紀錄也與技術指標共用） | `src/shared/daily-digest.js`、`digest-scheduler.js`、`digest-state.js` |
 | Webhook 清單讀取（共用） | `src/shared/targets.js` |
 | 專屬測試 | `test/crypto/` |
 

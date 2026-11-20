@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { config } from '../../src/crypto/config.js';
 import { runDaily } from '../../src/crypto/run.js';
-import { loadDigestState, saveDigestState } from '../../src/crypto/state.js';
+import { loadDigestState, saveDigestState } from '../../src/shared/digest-state.js';
 import { listPosts } from '../../src/shared/posts.js';
 
 const A = '555555555555555555';

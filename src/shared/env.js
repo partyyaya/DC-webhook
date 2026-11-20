@@ -6,7 +6,7 @@ import { parseEnv } from 'node:util';
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 /** 支援的主題；各主題的設定放在 env/<主題>.js（見 topic-config.js）。 */
-export const SOURCES = ['artale', 'crypto'];
+export const SOURCES = ['artale', 'crypto', 'stock', 'signal'];
 
 /**
  * 載入共用環境檔 env/.env.shared（使用的 AI、CLI 執行檔、模型、API key 等所有主題共用的設定）。
