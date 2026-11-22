@@ -37,7 +37,7 @@ const { schedule } = config;
 /**
  * 執行一次檢查。
  *   - 內容轉譯錯誤：轉出來的內容不可信，停止整個排程程式（不再輪詢），等人工確認官網結構後再重新啟動。
- *   - 其他錯誤：記錄後繼續排程；下次只處理仍在該輪時間範圍內的公告。
+ *   - 其他錯誤：記錄後繼續排程；版本更新重試最新三篇，其他分類仍需在該輪時間範圍內。
  */
 async function check(options = {}) {
   try {
@@ -67,7 +67,7 @@ async function sleepUntil(target) {
 
 log(`排程模式啟動：${describeSchedule(schedule)}；共 ${config.targets.length} 個 Webhook`);
 
-// 啟動時不受星期與時段限制，先比對第一頁；後續排程才使用回溯時間區間。
+// 啟動時不受星期與時段限制；後續版本更新持續比對最新三篇，其他分類套用回溯時間區間。
 log('啟動時先檢查一次第一頁公告。');
 await check({ startup: true });
 

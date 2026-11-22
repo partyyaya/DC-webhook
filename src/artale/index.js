@@ -12,7 +12,7 @@ import { parseArgs } from 'node:util';
 import { ContentParseError } from './errors.js';
 import { logError } from '../shared/log.js';
 
-// 預設檢查第一頁全部已發布公告；--window 可模擬後續排程的時間區間檢查。
+// 預設依分類篇數上限檢查第一頁；--window 模擬後續排程，版本更新仍不限制回溯分鐘數。
 const { values } = parseArgs({
   options: {
     'dry-run': { type: 'boolean', default: false },

@@ -3,6 +3,8 @@ import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { config } from '../../src/artale/config.js';
 import { listPosts } from '../../src/shared/posts.js';
 import { runOnce } from '../../src/artale/run.js';
@@ -32,6 +34,14 @@ const category = schema?.properties.periods ? 'maintenance' : schema?.properties
 process.stdin.resume();
 process.stdin.on('end', () => fs.writeFileSync(args[args.indexOf('--output-last-message') + 1], typeof replies === 'string' ? replies : replies[category]));
 `, { mode: 0o755 });
+  // Windows 不會依 shebang 執行模擬 CLI，改由 Node 啟動同一份測試程式。
+  if (process.platform === 'win32') {
+    const spawn = childProcess.spawn;
+    const mocked = t.mock.method(childProcess, 'spawn', (command, args, options) =>
+      command === bin ? spawn(process.execPath, [bin, ...args], options) : spawn(command, args, options));
+    syncBuiltinESMExports();
+    t.after(() => { mocked.mock.restore(); syncBuiltinESMExports(); });
+  }
   Object.assign(config, {
     newsCategories: Array.isArray(category) ? [...category] : [category], targets,
     stateFile: path.join(dir, 'state.json'), discordMessagesFile: path.join(dir, 'posts.jsonl'),
@@ -238,8 +248,8 @@ test('09:20 檢查 08:20～09:20 內三篇不同公告，依時間發送並逐�
   assert.match(posts.at(-1).embeds[0].title, /^【公告更新】/);
 });
 
-test('檢查範圍使用 ARTALE_CHECK_INTERVAL_MINUTES，不固定為 60 分鐘', async t => {
-  const { posts } = await setup(t, ['update'], replies, { entries: { update: [
+test('其他分類的檢查範圍使用 schedule.intervalMinutes，不固定為 60 分鐘', async t => {
+  const { posts } = await setup(t, ['event'], replies, { entries: { event: [
     { id: 'outside', publishedAt: '2026.11.17 08:49' },
     { id: 'start', publishedAt: '2026.11.17 08:50' },
     { id: 'end', publishedAt: '2026.11.17 09:20' },
@@ -250,7 +260,7 @@ test('檢查範圍使用 ARTALE_CHECK_INTERVAL_MINUTES，不固定為 60 分鐘'
 });
 
 test('區間內沒有公告時 force 也不回退發舊公告、不呼叫摘要或寫入紀錄', async t => {
-  const { posts } = await setup(t, ['update'], replies, { entries: { update: [
+  const { posts } = await setup(t, ['bm'], replies, { entries: { bm: [
     { id: 'old', publishedAt: '2026.11.17 08:19' },
     { id: 'future', publishedAt: '2026.11.17 09:21' },
   ] } });
@@ -330,11 +340,44 @@ test('啟動檢查包含第一頁舊公告，保留去重與修改比對並排�
   assert.equal(posts.length, 2);
   articles.find(item => item.id === 'old').content = '舊公告內文修改';
   const scheduled = await runOnce();
-  assert.deepEqual(scheduled.map(item => item.announcement.id), ['current']);
-  assert.equal(posts.length, 2);
-  await runOnce({ startup: true });
+  assert.deepEqual(scheduled.map(item => [item.announcement.id, item.status]), [['old', 'sent'], ['current', 'unchanged']]);
   assert.equal(posts.length, 3);
   assert.match(posts.at(-1).embeds[0].title, /^【公告更新】/);
+  await runOnce({ startup: true });
+  assert.equal(posts.length, 3);
+});
+
+test('跨日輪詢只對版本更新比對最新三篇，偵測舊文更正並維持去重、其他分類時間範圍及未來公告排除', async t => {
+  const articles = [
+    { id: 'future', publishedAt: '2026.11.21 08:00' },
+    { id: 'newest', publishedAt: '2026.11.17 08:13' },
+    { id: 'second', publishedAt: '2026.11.16 08:00' },
+    { id: 'third', publishedAt: '2026.11.15 08:00' },
+    { id: 'fourth', publishedAt: '2026.11.14 08:00' },
+  ];
+  const maintenance = { id: 'maintenance', publishedAt: '2026.11.17 09:00' };
+  const shop = { id: 'shop', publishedAt: '2026.11.17 08:00' };
+  const { posts, codexCount } = await setup(t, ['maintenance', 'update', 'bm'], replies, { entries: {
+    update: articles, maintenance: [maintenance], bm: [shop],
+  } });
+  await runOnce({ startup: true });
+  const count = await codexCount();
+  posts.length = 0;
+  articles[1].content = '今天更正舊公告，原始發布時間不變';
+  articles[4].content = '第四篇修改仍不在選取範圍';
+  maintenance.content = '舊維護修改';
+  shop.content = '舊商城修改';
+  const now = Date.parse('2026-11-20T01:30:00Z');
+  const results = await runOnce({ now });
+  assert.deepEqual(results.map(r => [r.announcement.id, r.status]), [
+    ['third', 'unchanged'], ['second', 'unchanged'], ['newest', 'sent'],
+  ]);
+  assert.equal(posts.length, 1);
+  assert.match(posts[0].embeds[0].title, /^【公告更新】/);
+  assert.equal(await codexCount(), count + 1);
+  await runOnce({ now: now + 60 * 60_000 });
+  assert.equal(posts.length, 1);
+  assert.equal(await codexCount(), count + 1);
 });
 
 test('啟動檢查即使 force 也維持維護判斷與各分類發送順序', async t => {

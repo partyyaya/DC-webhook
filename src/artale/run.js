@@ -71,7 +71,7 @@ const ANNOUNCEMENT_LIMITS = { maintenance: 1, update: 3, bm: 1 };
  * 錯誤處理：
  *   - 內容轉譯錯誤（ContentParseError）：立即停止，不發送任何訊息，直接拋出。
  *   - 抓取暫時失敗：跳過該分類；摘要或發送失敗：只跳過該篇，其他公告繼續處理。
- *     全部處理完後再拋錯；後續執行只有仍在時間範圍內的公告才會再試。
+ *     全部處理完後再拋錯；後續執行只重試仍在各分類選取範圍內的公告。
  *
  * @param {object} [options]
  * @param {boolean} [options.dryRun=false] 預覽模式：印出將發送的內容，但不發送 Discord、不寫入紀錄
@@ -100,7 +100,7 @@ export async function runOnce({ dryRun = false, force = false, startup = false, 
   if (!Number.isFinite(endTime)) throw new Error('執行時間無效');
   const showTime = time => new Date(time + 8 * 60 * 60 * 1000).toISOString().replace('T', ' ').replace('Z', '（GMT+8）');
   if (startup) log('啟動檢查：第一頁維護最新 1 篇、版本更新最新 3 篇、商城最新 1 篇，不限制回溯分鐘數。');
-  else log(`公告檢查範圍：${showTime(startTime)} ～ ${showTime(endTime)}（含起訖時間，只讀第一頁）`);
+  else log(`公告檢查範圍：${showTime(startTime)} ～ ${showTime(endTime)}（含起訖時間，只讀第一頁；版本更新最新 3 篇不限制回溯分鐘數）`);
   const failedLabels = [];
   const selected = new Set(config.newsCategories);
   const fetchCategories = [...selected];
@@ -115,16 +115,18 @@ export async function runOnce({ dryRun = false, force = false, startup = false, 
     const label = NEWS_CATEGORIES[category];
     try {
       const limit = selected.has(category) ? ANNOUNCEMENT_LIMITS[category] : 1;
+      // 版本更新可能在數天後更正內文，不能用原始發布時間排除內容比對。
+      const categoryStartTime = category === 'update' ? 0 : startTime;
       const { announcements, latestAnnouncement } = await fetchAnnouncementsInRange({
         newsUrl: categoryUrl(category),
         timeoutMs: config.httpTimeoutMs,
-        startTime, endTime,
+        startTime: categoryStartTime, endTime,
         includeLatest: selected.has('maintenance') && category === 'update',
         limit,
       });
       if (category === 'update') latestUpdate = latestAnnouncement;
       for (const announcement of announcements) fetched.push({ category, label, announcement });
-      if (selected.has(category)) log(`[${label}] 第一頁${limit ? `最新 ${limit} 篇中` : '中'}符合${startup ? '啟動檢查' : '時間範圍'}的公告共 ${announcements.length} 篇。`);
+      if (selected.has(category)) log(`[${label}] 第一頁${limit ? `最新 ${limit} 篇中` : '中'}符合${startup || category === 'update' ? '檢查範圍（不限制回溯分鐘數）' : '時間範圍'}的公告共 ${announcements.length} 篇。`);
     } catch (err) {
       // 內容轉譯錯誤：加上分類名稱後往外拋，整次停止
       if (err instanceof ContentParseError) {
