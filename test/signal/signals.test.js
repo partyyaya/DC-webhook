@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildDiscordMessages, DISCLAIMER, DISCLAIMER_MESSAGE, NO_PICK_TEXT } from '../../src/signal/format.js';
 import { analyzeCandles } from '../../src/signal/indicators.js';
-import { parseMarketSymbols, tickSize, tradingCosts } from '../../src/signal/markets.js';
+import { autoPickLimit, parseMarketSymbols, tickSize, tradingCosts } from '../../src/signal/markets.js';
 import {
   buildSignalPrompt, buildSignalSchema, formatPrice, NOTE_MAX, parseSignals, REASON_MAX, riskReward, roundPrice,
 } from '../../src/signal/signals.js';
@@ -30,13 +30,21 @@ const wait = (symbol, extra = {}) => ({
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-9, `${actual} ≠ ${expected}`);
 const reply = (data) => JSON.stringify(data);
 
-test('標的清單：代號統一格式；AUTO 不分大小寫且不能混用；最多 10 個', () => {
-  assert.deepEqual(parseMarketSymbols('crypto', 'btc, ETHUSDT, sol/usdt, BTC', 'markets.crypto.symbols'), { auto: false, symbols: ['BTC', 'ETH', 'SOL'] });
-  assert.deepEqual(parseMarketSymbols('tw', 'auto', 'x'), { auto: true, symbols: [] });
-  assert.deepEqual(parseMarketSymbols('us', '', 'x'), { auto: false, symbols: [] });
-  assert.throws(() => parseMarketSymbols('crypto', 'BTC,AUTO', 'markets.crypto.symbols'), /markets\.crypto\.symbols 填 AUTO 時不能再加其他代號/);
-  assert.throws(() => parseMarketSymbols('crypto', '比特幣', 'markets.crypto.symbols'), /markets\.crypto\.symbols 格式錯誤.*BTC,ETH,ADA/);
-  assert.throws(() => parseMarketSymbols('us', 'A,B,C,D,E,F,G,H,I,J,K', 'markets.us.symbols'), /最多 10 個代號，目前有 11 個/);
+test('標的清單：代號統一格式、AUTO 不分大小寫且可以與代號混用；超過 10 個依填寫順序取前 10 個（AUTO 也算 1 個）', () => {
+  assert.deepEqual(parseMarketSymbols('crypto', 'btc, ETHUSDT, sol/usdt, BTC', 'markets.crypto.symbols'), { auto: false, symbols: ['BTC', 'ETH', 'SOL'], dropped: [] });
+  assert.deepEqual(parseMarketSymbols('tw', 'auto', 'x'), { auto: true, symbols: [], dropped: [] });
+  assert.deepEqual(parseMarketSymbols('us', '', 'x'), { auto: false, symbols: [], dropped: [] });
+  assert.deepEqual(parseMarketSymbols('crypto', 'BTC,auto,ETH,AUTO', 'x'), { auto: true, symbols: ['BTC', 'ETH'], dropped: [] });
+  assert.throws(() => parseMarketSymbols('crypto', 'BTC,比特幣', 'markets.crypto.symbols'), /markets\.crypto\.symbols 格式錯誤.*BTC,ETH,ADA/);
+
+  const letters = 'A,B,C,D,E,F,G,H,I,J,K';
+  assert.deepEqual(parseMarketSymbols('us', letters, 'x'), { auto: false, symbols: letters.split(',').slice(0, 10), dropped: ['K'] });
+  assert.deepEqual(parseMarketSymbols('us', `${letters.slice(0, 17)},AUTO`, 'x'), { auto: true, symbols: letters.split(',').slice(0, 9), dropped: [] }, '9 個代號 + AUTO');
+  assert.deepEqual(parseMarketSymbols('us', `${letters.slice(0, 19)},AUTO`, 'x'), { auto: false, symbols: letters.split(',').slice(0, 10), dropped: ['AUTO'] }, '第 11 個的 AUTO 被略過');
+  assert.deepEqual(parseMarketSymbols('us', `AUTO,${letters}`, 'x'), { auto: true, symbols: letters.split(',').slice(0, 9), dropped: ['J', 'K'] });
+
+  // AUTO 最多挑選的數量：剩下的卡片名額，最多 3 個
+  assert.deepEqual([0, 7, 8, 9, 10].map(autoPickLimit), [3, 3, 2, 1, 0]);
 });
 
 test('價格依現價的大小保留約 5 位有效數字', () => {
@@ -78,7 +86,7 @@ test('價位對齊最小跳動單位；風險報酬比扣除手續費、稅與�
 test('提示詞：依趨勢、動能與量能、價位的順序判斷，價格單位、指定代號的回覆順序與 AUTO 的挑選規則；Schema 只包含有資料的市場', () => {
   const plan = [
     market('crypto', [item('BTC', 62000), item('ETH', 1750)]),
-    market('tw', [item('2330', 2000, { name: '台積電', source: 'Yahoo Finance', ticker: '2330.TW', adjusted: true })], { auto: true, candidates: 15 }),
+    market('tw', [], { auto: true, candidates: 15, autoItems: [item('2330', 2000, { name: '台積電', source: 'Yahoo Finance', ticker: '2330.TW', adjusted: true })] }),
     market('us', [], { errors: [{ symbol: 'NVDA', message: '連線失敗' }] }),
   ];
   const prompt = buildSignalPrompt(plan, { now: NOW, timeZone: TZ });
@@ -162,17 +170,44 @@ test('進場方式：現價 ±1% 以內為現價進場；AI 標示限價且低�
 
 test('AUTO：只採用候選中可以做單的標的，依 AI 的順序最多 3 個', () => {
   const candidates = ['2330', '2317', '2454', '2308', '3711'].map((symbol) => item(symbol, 1000));
-  const plan = [market('tw', candidates, { auto: true, candidates: 5 })];
+  const plan = [market('tw', [], { auto: true, candidates: 5, autoItems: candidates })];
   const [result] = parseSignals(reply({ tw: [
     trade('2454', 1000, 1100, 950), wait('2330'), trade('9999', 10, 12, 9), trade('2308', 1500, 1600, 1400), trade('2317.TW', 990, 1080, 950),
     trade('3711', 1000, 1100, 950), trade('2454', 1000, 1200, 900),
   ] }), plan);
-  assert.deepEqual(result.signals.map((signal) => signal.symbol), ['2454', '2317', '3711']);
-  assert.equal(result.signals[0].takeProfit, 1100, '同一個代號只採用第一筆');
+  assert.deepEqual(result.signals, []);
+  assert.deepEqual(result.autoSignals.map((signal) => signal.symbol), ['2454', '2317', '3711']);
+  assert.equal(result.autoSignals[0].takeProfit, 1100, '同一個代號只採用第一筆');
   assert.deepEqual(result.warnings, ['AI 挑選的 9999 不在候選中，已略過', '2308 的價位檢查未通過（進場 1500 高於現價 1000 超過 1%，屬於追價），改為觀望']);
 
   const [none] = parseSignals(reply({ tw: [] }), plan);
-  assert.deepEqual(none.signals, []);
+  assert.deepEqual(none.autoSignals, []);
+});
+
+test('指定代號與 AUTO 混用：指定的每個都回覆，AUTO 從其餘候選中挑選，最多為剩下的名額', () => {
+  const listed = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'].map((symbol) => item(symbol, 100));
+  const plan = [market('us', listed, { auto: true, mixed: true, autoLimit: 1, candidates: 15, autoItems: [item('X', 100), item('Y', 100)] })];
+  const prompt = buildSignalPrompt(plan, { now: NOW, timeZone: TZ });
+  assert.match(prompt, /- 【指定標的】每個標的都要回覆一筆，依序為：A、B、C、D、E、F、G、H、I。\n- 【AUTO 候選】另外，以下 2 個是從.*的 15 個標的中（不含上面指定的代號），.*最多 1 個/);
+  assert.match(prompt, /1 個是上限而不是目標：找不到符合條件的標的.*AUTO 候選一個都不要回覆/);
+  assert.match(prompt, /【指定標的】\n\n### A\n[\s\S]*### I\n[\s\S]*【AUTO 候選】\n\n### X\n- 資料：.*\n- 趨勢篩選：/);
+
+  const [result] = parseSignals(reply({ us: [
+    ...listed.map((candidate) => wait(candidate.symbol)), trade('Y', 100, 110, 95), trade('X', 100, 110, 95),
+  ] }), plan);
+  assert.equal(result.signals.length, 9);
+  assert.deepEqual(result.autoSignals.map((signal) => signal.symbol), ['Y'], '最多 1 個，依 AI 的順序');
+
+  // 指定的 9 張 + AUTO 1 張 + 免責聲明；AUTO 挑選的標示（AUTO）
+  const [message] = buildDiscordMessages([result], { dateLabel: DATE });
+  assert.equal(message.embeds.length, 10);
+  assert.match(message.content, /🤖 AUTO：另從.*的 15 個標的中篩選出趨勢向上的 2 個，由 AI 挑選最多 1 個/);
+  assert.match(message.embeds[9].description, /^🏷️ \*\*標的\*\*：\*\*Y（AUTO）\*\*，\*\*是否做單\*\*：🟢 \*\*做多\*\*/);
+
+  // AUTO 沒有挑選時，佔用的名額顯示建議觀望
+  const [none] = buildDiscordMessages(parseSignals(reply({ us: listed.map((candidate) => wait(candidate.symbol)) }), plan), { dateLabel: DATE });
+  assert.equal(none.embeds.length, 10);
+  assert.deepEqual(none.embeds[9], { description: `💤 **AUTO**：${NO_PICK_TEXT}`, color: 0x95a5a6 });
 });
 
 test('做空：可以做空的市場與標的才採用，價位方向相反（止盈 < 進場 < 止損），反彈到壓力再放空為限價，往下追空則改為觀望', () => {
@@ -204,7 +239,7 @@ test('可以做空時，提示詞說明做空方式與每個標的能否放空�
     return { time: Date.parse('2026-01-01T00:00Z') + i * 86_400_000, open: close, high: close * 1.01, low: close * 0.99, close, volume: 100 };
   }));
   const plan = [
-    market('crypto', [item('ADA', 0.5, { shortable: true, snapshot: down }), item('SNEK', 0.0004, { shortable: false })], { auto: true, candidates: 15, allowShort: true }),
+    market('crypto', [], { auto: true, candidates: 15, allowShort: true, autoItems: [item('ADA', 0.5, { shortable: true, snapshot: down }), item('SNEK', 0.0004, { shortable: false })] }),
     market('us', [item('NVDA', 150, { shortable: null })], { allowShort: true }),
   ];
   const prompt = buildSignalPrompt(plan, { now: NOW, timeZone: TZ });
@@ -231,7 +266,7 @@ test('回覆不是 JSON 或缺少有資料的市場時拋錯；沒有資料的�
 test('Discord 訊息：每個市場一則，標題註明 K 線週期與價格單位；可以做單時列出進場方式、風險報酬比、止盈、止損；卡片底部都顯示現價；最後一則為免責聲明', () => {
   const plan = [
     market('crypto', [item('BTC', 62000), item('ETH', 1750)], { errors: [{ symbol: 'NOTACOIN', message: '無法取得 NOTACOINUSDT 的 K 線' }] }),
-    market('tw', [item('2330', 2000, { name: '台積電', source: 'Yahoo Finance', ticker: '2330.TW' })], { auto: true, candidates: 15 }),
+    market('tw', [], { auto: true, candidates: 15, autoItems: [item('2330', 2000, { name: '台積電', source: 'Yahoo Finance', ticker: '2330.TW' })] }),
     market('us', [], { auto: true, failure: '無法取得 AUTO 的候選標的：HTTP 500' }),
   ];
   const results = parseSignals(reply({

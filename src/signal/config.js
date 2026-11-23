@@ -3,7 +3,8 @@
  * 各欄位的說明與預設值請參考 docs/signal.md 的「設定參考」章節。
  */
 import path from 'node:path';
-import { isMarketEnabled, MARKETS, parseMarketSymbols, SIGNAL_INTERVAL } from './markets.js';
+import { isMarketEnabled, MARKETS, MAX_SYMBOLS, parseMarketSymbols, SIGNAL_INTERVAL } from './markets.js';
+import { logError } from '../shared/log.js';
 import { aiSettingsFromEnv } from '../shared/ai.js';
 import { createSchedule } from '../shared/schedule.js';
 import { loadProjectEnv, ROOT_DIR } from '../shared/env.js';
@@ -24,8 +25,11 @@ const markets = Object.fromEntries(MARKETS.map((market) => {
   const where = at(`markets.${market.key}`);
   const value = section(marketSettings[market.key], ['symbols', 'allowShort'], where);
   const symbolsKey = `${where}.symbols`;
+  // 超過 MAX_SYMBOLS 個時只取前面的，略過的在終端機提醒
+  const { dropped, ...parsed } = parseMarketSymbols(market.key, listText(value.symbols, market.defaultSymbols, symbolsKey), symbolsKey);
+  if (dropped.length > 0) logError(`${symbolsKey} 超過 ${MAX_SYMBOLS} 個，只分析前 ${MAX_SYMBOLS} 個，略過：${dropped.join('、')}`);
   return [market.key, {
-    ...parseMarketSymbols(market.key, listText(value.symbols, market.defaultSymbols, symbolsKey), symbolsKey),
+    ...parsed,
     interval: SIGNAL_INTERVAL,
     allowShort: boolean(value.allowShort, true, `${where}.allowShort`),
   }];

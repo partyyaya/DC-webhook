@@ -14,6 +14,7 @@
  *   📝 注意事項：若……，則直接撤單      （選填）
  * 風險報酬比為扣除交易成本後的數值（signals.js）。
  * 觀望時不顯示進場、止盈、止損。每張卡片底部都顯示現價與資料來源。
+ * 卡片順序：指定的代號 → 無法取得行情的代號 → AUTO 挑選的標的（與指定代號混用時標示「（AUTO）」）。
  * AUTO 沒有挑出任何標的時（找不到符合條件的標的，或市場不適合做單），顯示一張觀望卡片。
  */
 import { AUTO_MAX_PICKS, INTERVALS, marketOf } from './markets.js';
@@ -54,17 +55,15 @@ export function buildDiscordMessages(results, { dateLabel }) {
 
 function buildMarketMessage(market, dateLabel) {
   const info = marketOf(market.key);
+  const autoSignals = market.autoSignals ?? [];
   const notes = [`🕒 ${INTERVALS[market.interval].label}`, `💵 價格單位：${info.unitNote}`];
   if (market.auto && !market.failure) {
-    notes.push(`🤖 AUTO：從${info.autoUniverse}的 ${market.candidates} 個標的中篩選出${market.allowShort ? '趨勢明確' : '趨勢向上'}的 ${market.analyzed} 個，由 AI 挑選最多 ${AUTO_MAX_PICKS} 個`);
+    notes.push(`🤖 AUTO：${market.mixed ? '另' : ''}從${info.autoUniverse}的 ${market.candidates} 個標的中篩選出${market.allowShort ? '趨勢明確' : '趨勢向上'}`
+      + `的 ${market.analyzed} 個，由 AI 挑選最多 ${market.autoLimit ?? AUTO_MAX_PICKS} 個`);
   }
 
+  // 指定的代號（依設定順序）→ 無法取得行情的代號 → AUTO 挑選的標的（或沒有挑選、無法取得候選的說明）
   const embeds = market.signals.map((signal) => signalEmbed(signal, info));
-  if (market.failure) {
-    embeds.push({ description: item('❌', `${info.name} AUTO`, `${truncate(market.failure, 300)}，本次略過。`), color: COLORS.error });
-  } else if (market.auto && market.signals.length === 0) {
-    embeds.push({ description: `💤 ${NO_PICK_TEXT}`, color: COLORS.wait });
-  }
   for (const error of market.errors) {
     embeds.push({
       description: [
@@ -74,17 +73,25 @@ function buildMarketMessage(market, dateLabel) {
       color: COLORS.error,
     });
   }
+  if (market.failure) {
+    embeds.push({ description: item('❌', `${info.name} AUTO`, `${truncate(market.failure, 300)}，本次略過。`), color: COLORS.error });
+  } else if (market.auto && autoSignals.length === 0) {
+    embeds.push({ description: market.mixed ? `💤 **AUTO**：${NO_PICK_TEXT}` : `💤 ${NO_PICK_TEXT}`, color: COLORS.wait });
+  } else {
+    // 與指定代號混用時，在標的後面標示（AUTO），與指定的代號區分
+    embeds.push(...autoSignals.map((signal) => signalEmbed(signal, info, { autoTag: market.mixed })));
+  }
   return { content: `## ${info.heading}技術分析｜${dateLabel}\n-# ${notes.join('・')}`, embeds: embeds.slice(0, MAX_EMBEDS) };
 }
 
 /** 單一標的的卡片。 */
-function signalEmbed(signal, info) {
+function signalEmbed(signal, info, { autoTag = false } = {}) {
   const price = (value) => formatPrice(value, signal.price);
   const percent = (value) => {
     const change = ((value - signal.entry) / signal.entry) * 100;
     return `${change >= 0 ? '+' : ''}${change.toFixed(1)}%`;
   };
-  const name = signal.name ? `${signal.symbol} ${truncate(signal.name, 20)}` : signal.symbol;
+  const name = `${signal.name ? `${signal.symbol} ${truncate(signal.name, 20)}` : signal.symbol}${autoTag ? '（AUTO）' : ''}`;
   const trade = signal.action === 'trade';
   // 可以做單時依方向（做多／做空）顯示，觀望另外顯示
   const kind = trade ? signal.direction : 'wait';

@@ -3,7 +3,7 @@
  *   - crypto：虛擬貨幣，USDT 交易對（Binance、Bybit、Bitget），價格單位為美元
  *   - tw：台股（上市、上櫃），價格單位為新台幣
  *   - us：美股，價格單位為美元
- * 每個市場可以填多個代號，或填 AUTO 交給 AI 從成交最熱絡的標的中挑選；清單留空代表不分析該市場。
+ * 每個市場可以填多個代號、填 AUTO 交給 AI 從成交最熱絡的標的中挑選，或兩者混用；清單留空代表不分析該市場。
  * 一律不開槓桿：做多為現貨買進；做空（allowShort）時虛擬貨幣以 USDT 永續合約 1 倍放空，股票以融券放空。
  * K 線固定使用日線（SIGNAL_INTERVAL）；行情與指標模組仍支援 4h、1h，需要時可在這裡調整。
  */
@@ -59,6 +59,17 @@ export const MAX_SYMBOLS = 10;
 // AUTO 時交給 AI 挑選的候選數量，以及最多挑選幾個
 export const AUTO_CANDIDATES = 15;
 export const AUTO_MAX_PICKS = 3;
+
+/**
+ * AUTO 最多挑選幾個：最多 AUTO_MAX_PICKS 個，與指定代號混用時不超過剩下的卡片名額，
+ * 例如指定 8 個代號時最多 2 個、指定 9 個時最多 1 個。
+ *
+ * @param {number} symbolCount 指定代號的數量
+ * @returns {number}
+ */
+export function autoPickLimit(symbolCount) {
+  return Math.max(0, Math.min(AUTO_MAX_PICKS, MAX_SYMBOLS - symbolCount));
+}
 
 // 做單的最低風險報酬比（扣除交易成本後）
 export const MIN_RISK_REWARD = 1.5;
@@ -131,20 +142,18 @@ export const marketOf = (key) => MARKETS.find((market) => market.key === key);
 export const isMarketEnabled = (market) => market.auto || market.symbols.length > 0;
 
 /**
- * 解析市場的標的清單：逗號分隔的代號，或 AUTO（不能與其他代號混用）；可以是空的（不分析該市場）。
+ * 解析市場的標的清單：逗號分隔的代號、AUTO，或兩者混用（例如 BTC,ETH,AUTO）；可以是空的（不分析該市場）。
+ * 重複的代號只保留第一次。超過 MAX_SYMBOLS 個時依填寫順序只取前 MAX_SYMBOLS 個（AUTO 也算 1 個），
+ * 其餘放在 dropped，例如 9 個代號加上 AUTO 時 AUTO 挑選 1 個；10 個代號後面的 AUTO 會被略過。
  *
  * @param {'crypto' | 'tw' | 'us'} key 市場
  * @param {string} text 逗號分隔的代號或 AUTO
  * @param {string} where 錯誤訊息使用的欄位名稱
- * @returns {{auto: boolean, symbols: string[]}}
+ * @returns {{auto: boolean, symbols: string[], dropped: string[]}}
  */
 export function parseMarketSymbols(key, text, where) {
   const parts = String(text).split(',').map((part) => part.trim()).filter(Boolean);
-  if (parts.some((part) => part.toUpperCase() === 'AUTO')) {
-    if (parts.length > 1) throw new Error(`${where} 填 AUTO 時不能再加其他代號，目前為「${text}」`);
-    return { auto: true, symbols: [] };
-  }
-  const symbols = parseSymbols(key, text, where);
-  if (symbols.length > MAX_SYMBOLS) throw new Error(`${where} 最多 ${MAX_SYMBOLS} 個代號，目前有 ${symbols.length} 個`);
-  return { auto: false, symbols };
+  const entries = [...new Set(parts.map((part) => (part.toUpperCase() === 'AUTO' ? 'AUTO' : parseSymbols(key, part, where)[0])))];
+  const kept = entries.slice(0, MAX_SYMBOLS);
+  return { auto: kept.includes('AUTO'), symbols: kept.filter((entry) => entry !== 'AUTO'), dropped: entries.slice(MAX_SYMBOLS) };
 }

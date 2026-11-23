@@ -225,8 +225,14 @@ test('整理市場資料：最後一根已收盤 K 線太舊時視為停止更�
   assert.deepEqual(explicit.errors, [{ symbol: 'OLD', message: `最後一根已收盤 K 線為 ${new Date(now - 11 * day).toISOString().slice(0, 10)}，資料可能已停止更新` }]);
 
   const [auto] = await prepareMarkets({ crypto: { auto: true, symbols: [], interval: '1d' } }, { now });
-  assert.deepEqual({ candidates: auto.candidates, loaded: auto.loaded, items: auto.items.map((item) => item.symbol), failure: auto.failure },
-    { candidates: 2, loaded: 2, items: ['UP'], failure: null });
+  assert.deepEqual({ candidates: auto.candidates, loaded: auto.loaded, autoItems: auto.autoItems.map((item) => item.symbol), failure: auto.failure },
+    { candidates: 2, loaded: 2, autoItems: ['UP'], failure: null });
+  assert.deepEqual([auto.items, auto.mixed, auto.autoLimit], [[], false, 3]);
+
+  // 與指定代號混用：指定的代號另外取得，AUTO 的候選排除已指定的代號
+  const [mixed] = await prepareMarkets({ crypto: { auto: true, symbols: ['UP'], interval: '1d' } }, { now });
+  assert.deepEqual({ items: mixed.items.map((item) => item.symbol), autoItems: mixed.autoItems.map((item) => item.symbol), candidates: mixed.candidates, mixed: mixed.mixed, loaded: mixed.loaded },
+    { items: ['UP'], autoItems: [], candidates: 1, mixed: true, loaded: 2 });
 });
 
 test('可以放空的標的：虛擬貨幣取三家永續合約的聯集（其中一家失敗仍可使用），台股為融券限額大於 0 且未停止融券；美股無法確認', async (t) => {
@@ -268,8 +274,8 @@ test('可以做空時，AUTO 也把趨勢向下、而且能放空的候選交給
   });
   const [market] = await prepareMarkets({ crypto: { auto: true, symbols: [], interval: '1d', allowShort: true } }, { now });
   assert.equal(market.allowShort, true);
-  assert.deepEqual(market.items.map((item) => [item.symbol, item.shortable]), [['UP', false], ['DOWN', true]], 'NOPERP 趨勢向下但無法放空，不交給 AI');
+  assert.deepEqual(market.autoItems.map((item) => [item.symbol, item.shortable]), [['UP', false], ['DOWN', true]], 'NOPERP 趨勢向下但無法放空，不交給 AI');
 
   const [longOnly] = await prepareMarkets({ crypto: { auto: true, symbols: [], interval: '1d', allowShort: false } }, { now });
-  assert.deepEqual(longOnly.items.map((item) => [item.symbol, item.shortable]), [['UP', false]]);
+  assert.deepEqual(longOnly.autoItems.map((item) => [item.symbol, item.shortable]), [['UP', false]]);
 });

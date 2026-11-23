@@ -6,7 +6,7 @@
  *   2. 動能與量能（確認）：MACD、RSI、成交量與成交額
  *   3. 價位：進場（現價或限價）、止損、止盈
  * 一律不開槓桿：做多為現貨買進；做空時虛擬貨幣以 USDT 永續合約 1 倍、股票以融券放空。交易優勢不明確時觀望。
- * 指定代號的市場每個標的都回覆；AUTO 的市場由 AI 從通過趨勢篩選的候選中挑選最多 AUTO_MAX_PICKS 個。
+ * 指定的代號每個都回覆；AUTO 由 AI 從通過趨勢篩選的候選中挑選，最多 autoLimit 個（與指定代號混用時依剩下的卡片名額，1～3 個）。
  *
  * AI 的回覆由程式再檢查一次：能否做空、價位對齊最小跳動單位、價位順序（做多止損 < 進場 < 止盈，做空相反）、
  * 現價／限價與進場價是否相符，並扣除交易成本後計算風險報酬比，不足 MIN_RISK_REWARD 時改為觀望。
@@ -112,7 +112,9 @@ const SHORTABLE_TEXT = {
 };
 
 /** 需要交給 AI 判斷的市場（有標的的市場；AUTO 為通過趨勢篩選的候選）。 */
-const analyzableMarkets = (plan) => plan.filter((market) => market.items.length > 0);
+const analyzableMarkets = (plan) => plan.filter((market) => market.items.length > 0 || (market.autoItems ?? []).length > 0);
+/** AUTO 最多挑選幾個（市場資料沒有 autoLimit 時為 AUTO_MAX_PICKS）。 */
+const autoLimitOf = (market) => market.autoLimit ?? AUTO_MAX_PICKS;
 
 /**
  * 做單建議的 JSON 格式（JSON Schema），要求 AI 的回覆必須符合；只包含需要判斷的市場。
@@ -217,19 +219,29 @@ export function buildSignalPrompt(plan, { now, timeZone }) {
     const filter = market.allowShort
       ? '趨勢明確（向上：收盤價高於 EMA50 且 EMA20 > EMA50；向下：收盤價低於 EMA50 且 EMA20 < EMA50）'
       : '趨勢向上（收盤價高於 EMA50，且 EMA20 > EMA50）';
-    const rules = market.auto
-      ? [
-        `- 以下 ${market.items.length} 個是從${info.autoUniverse}的 ${market.candidates} 個標的中，由程式篩選出${filter}的候選。請從中挑選符合上述規則的標的，最多 ${AUTO_MAX_PICKS} 個，action 一律填 "trade"，依把握度由高到低排列。`,
-        `- ${AUTO_MAX_PICKS} 個是上限而不是目標：符合條件的只有 1、2 個就只填 1、2 個；找不到符合條件的標的，或市場整體不適合做單、訊號不明確時，直接回傳空陣列，不要為了湊數勉強挑選。`,
+    const autoItems = market.autoItems ?? [];
+    const limit = autoLimitOf(market);
+    const mixed = market.items.length > 0 && autoItems.length > 0;
+    // 少於上限時的說明，例如上限 3 個時為「1、2」
+    const fewer = Array.from({ length: limit - 1 }, (_, i) => i + 1).join('、');
+    const describe = (item, auto) => `${describeItem(item, { market: market.key, interval: market.interval, timeZone, auto, allowShort: market.allowShort })}\n`;
+    const rules = [
+      ...(market.items.length > 0 ? [`- ${mixed ? '【指定標的】' : ''}每個標的都要回覆一筆，依序為：${market.items.map((item) => item.symbol).join('、')}。`] : []),
+      ...(autoItems.length > 0 ? [
+        `- ${mixed ? '【AUTO 候選】另外，' : ''}以下 ${autoItems.length} 個是從${info.autoUniverse}的 ${market.candidates} 個標的中${mixed ? '（不含上面指定的代號）' : ''}，由程式篩選出${filter}的候選。請從中挑選符合上述規則的標的，最多 ${limit} 個，action 一律填 "trade"，依把握度由高到低排列${mixed ? '；沒有挑選的候選不用回覆' : ''}。`,
+        `- ${limit} 個是上限而不是目標：${fewer ? `符合條件的只有 ${fewer} 個就只填 ${fewer} 個；` : ''}找不到符合條件的標的，或市場整體不適合做單、訊號不明確時，${mixed ? 'AUTO 候選一個都不要回覆' : '直接回傳空陣列'}，不要為了湊數勉強挑選。`,
         ...(market.key === 'crypto' ? ['- 候選中若有追蹤股票或 ETF 價格的代幣化股票（例如名稱是股票代號加 B 的 NVDAB、SOXLB），不要挑選。'] : []),
-      ]
-      : [`- 每個標的都要回覆一筆，依序為：${market.items.map((item) => item.symbol).join('、')}。`];
+      ] : []),
+    ];
     return [
       `${numerals[index]}、${market.key}：${info.name}，${INTERVALS[market.interval].label}，價格單位：${info.unitNote}，`
         + `${market.allowShort ? `可以做多或做空（做空方式：${info.shortMethod}）` : '只能做多'}`,
       ...rules,
       '',
-      ...market.items.map((item) => `${describeItem(item, { market: market.key, interval: market.interval, timeZone, auto: market.auto, allowShort: market.allowShort })}\n`),
+      ...(mixed ? ['【指定標的】', ''] : []),
+      ...market.items.map((item) => describe(item, false)),
+      ...(mixed ? ['【AUTO 候選】', ''] : []),
+      ...autoItems.map((item) => describe(item, true)),
     ];
   });
   const holding = [...new Set(markets.map((market) => market.interval))].map((key) => `${INTERVALS[key].label}約${INTERVALS[key].holding}`).join('，');
@@ -300,13 +312,14 @@ export function buildSignalPrompt(plan, { now, timeZone }) {
 /**
  * 解析並檢查 AI 回覆的做單建議。
  *   - 指定代號的市場：依設定的順序，每個標的一筆；AI 沒有回覆的標的顯示為觀望。
- *   - AUTO 的市場：只採用候選中、action 為 trade 的標的，依 AI 的順序最多 AUTO_MAX_PICKS 個。
+ *   - AUTO：只採用候選中、action 為 trade 的標的，依 AI 的順序最多 autoLimit 個（autoSignals）。
  *   - 可以做單時由程式檢查能否做空與價位（見 checkSignal()），不通過時改為觀望（AUTO 則捨棄），並在原因中註明。
  *   - 原因與注意事項限制長度。
  *
  * @param {string} text AI 的回覆
  * @param {object[]} plan prepareMarkets() 的結果
- * @returns {object[]} 每個市場：plan 的欄位加上 signals（做單建議）與 warnings（記錄到終端機的提醒）
+ * @returns {object[]} 每個市場：plan 的欄位加上 signals（指定代號的建議）、autoSignals（AUTO 挑選的建議）、
+ *   analyzed（交給 AI 的 AUTO 候選數量）與 warnings（記錄到終端機的提醒）
  */
 export function parseSignals(text, plan) {
   let data;
@@ -319,35 +332,34 @@ export function parseSignals(text, plan) {
     throw new Error('AI 回覆的做單建議格式不符');
   }
 
-  return plan.map(({ items, ...market }) => {
+  return plan.map(({ items, autoItems = [], ...market }) => {
     const warnings = [];
     // AI 的回覆依代號整理；同一個代號只採用第一筆
     const replies = new Map();
-    for (const reply of items.length > 0 ? data[market.key] : []) {
+    for (const reply of items.length + autoItems.length > 0 ? data[market.key] : []) {
       if (typeof reply?.symbol !== 'string') continue;
       const symbol = normalizeSymbol(market.key, reply.symbol);
       if (!replies.has(symbol)) replies.set(symbol, reply);
     }
 
-    let signals;
-    if (market.auto) {
-      signals = [...replies]
-        .map(([symbol, reply]) => {
-          const item = items.find((candidate) => candidate.symbol === symbol);
-          if (!item) warnings.push(`AI 挑選的 ${symbol} 不在候選中，已略過`);
-          return item ? normalizeSignal(reply, item, market, warnings) : null;
-        })
-        .filter((signal) => signal?.action === 'trade')
-        .slice(0, AUTO_MAX_PICKS);
-    } else {
-      signals = items.map((item) => {
-        if (replies.has(item.symbol)) return normalizeSignal(replies.get(item.symbol), item, market, warnings);
-        warnings.push(`AI 沒有回覆 ${item.symbol} 的分析，顯示為觀望`);
-        return { ...baseSignal(item), action: 'wait', reason: 'AI 沒有回覆這個標的的分析。', note: '' };
-      });
-    }
-    // analyzed：交給 AI 判斷的標的數量（AUTO 為通過趨勢篩選的候選數量）
-    return { ...market, analyzed: items.length, signals, warnings };
+    // 指定的代號：依設定順序，每個一筆
+    const signals = items.map((item) => {
+      if (replies.has(item.symbol)) return normalizeSignal(replies.get(item.symbol), item, market, warnings);
+      warnings.push(`AI 沒有回覆 ${item.symbol} 的分析，顯示為觀望`);
+      return { ...baseSignal(item), action: 'wait', reason: 'AI 沒有回覆這個標的的分析。', note: '' };
+    });
+
+    // AUTO：其餘回覆中，候選裡可以做單的標的，依 AI 的順序最多 autoLimit 個
+    const autoSignals = !market.auto ? [] : [...replies]
+      .filter(([symbol]) => !items.some((item) => item.symbol === symbol))
+      .map(([symbol, reply]) => {
+        const item = autoItems.find((candidate) => candidate.symbol === symbol);
+        if (!item) warnings.push(`AI 挑選的 ${symbol} 不在候選中，已略過`);
+        return item ? normalizeSignal(reply, item, market, warnings) : null;
+      })
+      .filter((signal) => signal?.action === 'trade')
+      .slice(0, autoLimitOf(market));
+    return { ...market, analyzed: autoItems.length, signals, autoSignals, warnings };
   });
 }
 

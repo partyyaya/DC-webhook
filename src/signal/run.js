@@ -23,7 +23,7 @@ import { formatDateInZone } from '../shared/schedule.js';
 function describeMarkets(markets) {
   return MARKETS.filter((market) => isMarketEnabled(markets[market.key])).map((market) => {
     const { auto, symbols, interval } = markets[market.key];
-    return `${market.name} ${INTERVALS[interval].label}（${auto ? 'AUTO' : symbols.join('、')}）`;
+    return `${market.name} ${INTERVALS[interval].label}（${[...symbols, ...(auto ? ['AUTO'] : [])].join('、')}）`;
   }).join('、');
 }
 
@@ -46,15 +46,18 @@ export const { assertTargets, runDaily: runOnce } = createDailyDigest({
     const plan = await prepareMarkets(config.markets, { now: to.getTime(), timeoutMs: config.httpTimeoutMs });
     for (const market of plan) {
       const { name } = marketOf(market.key);
-      if (market.failure) continue;
-      log(market.auto
-        ? `[${name}] AUTO 候選 ${market.candidates} 個，取得 ${market.loaded} 個的資料，其中 ${market.items.length} 個${market.allowShort ? '趨勢明確' : '趨勢向上'}`
-        : `[${name}] 取得 ${market.loaded} 個標的的資料`);
+      const parts = [];
+      const listed = market.items.length + market.errors.length;
+      if (listed > 0) parts.push(`指定 ${listed} 個，取得 ${market.items.length} 個的資料`);
+      if (market.auto && !market.failure) {
+        parts.push(`AUTO 候選 ${market.candidates} 個，其中 ${market.autoItems.length} 個${market.allowShort ? '趨勢明確' : '趨勢向上'}，最多挑選 ${market.autoLimit} 個`);
+      }
+      if (parts.length > 0) log(`[${name}] ${parts.join('；')}`);
     }
     if (plan.every((market) => market.loaded === 0)) throw new Error('所有標的都無法取得行情資料，本次不發送（前一次的訊息保留在頻道上）');
 
-    // 步驟 2：交給 AI 判斷是否做單；AUTO 的候選都沒有通過趨勢篩選時，不需要呼叫 AI
-    const total = plan.reduce((sum, market) => sum + market.items.length, 0);
+    // 步驟 2：交給 AI 判斷是否做單；沒有指定代號、AUTO 的候選也都沒有通過趨勢篩選時，不需要呼叫 AI
+    const total = plan.reduce((sum, market) => sum + market.items.length + market.autoItems.length, 0);
     let reply = '{}';
     if (total > 0) {
       log(`以 ${aiLabel(config.ai.provider)} 判斷是否做單：共 ${total} 個標的，約需數分鐘…`);
@@ -67,7 +70,8 @@ export const { assertTargets, runDaily: runOnce } = createDailyDigest({
       const { name } = marketOf(market.key);
       for (const warning of market.warnings) logError(`[${name}] ${warning}`);
       for (const signal of market.signals) log(`  [${name} ${signal.symbol}] ${describeSignal(signal)}`);
-      if (market.auto && !market.failure && market.signals.length === 0) log(`  [${name} AUTO] 沒有符合做單條件的標的`);
+      for (const signal of market.autoSignals) log(`  [${name} AUTO ${signal.symbol}] ${describeSignal(signal)}`);
+      if (market.auto && !market.failure && market.autoSignals.length === 0) log(`  [${name} AUTO] 沒有符合做單條件的標的`);
     }
 
     // 步驟 3：組成 Discord 訊息（所有 Webhook 共用同一份內容）

@@ -276,11 +276,19 @@ export default {
   });
 });
 
+test('技術指標的代號可以與 AUTO 混用；超過 10 個時依填寫順序取前 10 個（AUTO 也算 1 個）', async (t) => {
+  const letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'];
+  const { markets } = await readConfig(t, 'signal', { markets: { crypto: { symbols: ['BTC', 'AUTO'] }, us: { symbols: [...letters.slice(0, 9), 'AUTO', 'K'] } } });
+  assert.deepEqual(markets.crypto, { auto: true, symbols: ['BTC'], interval: '1d', allowShort: true });
+  assert.deepEqual(markets.us, { auto: true, symbols: letters.slice(0, 9), interval: '1d', allowShort: true });
+  assert.deepEqual((await readConfig(t, 'signal', { markets: { us: { symbols: [...letters, 'AUTO'] } } })).markets.us,
+    { auto: false, symbols: letters.slice(0, 10), interval: '1d', allowShort: true });
+});
+
 test('技術指標設定錯誤明確指出設定檔與欄位名稱', async (t) => {
   const none = { symbols: [] };
   const cases = [
     [{ markets: { crypto: none, tw: none, us: none } }, 'markets 至少要有一個市場的 symbols 填寫代號或 AUTO'],
-    [{ markets: { crypto: { symbols: ['BTC', 'AUTO'] } } }, 'markets.crypto.symbols 填 AUTO 時不能再加其他代號'],
     [{ markets: { tw: { symbols: [50] } } }, '0 開頭的代號（例如 0050）請加引號'],
     [{ markets: { us: { symbols: ['蘋果'] } } }, 'markets.us.symbols 格式錯誤'],
     [{ markets: { us: { symbols: ['NVDA'], interval: '4h' } } }, 'markets.us 有不支援的欄位：interval'],

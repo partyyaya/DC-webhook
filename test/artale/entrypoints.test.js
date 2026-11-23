@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { hashAnnouncement } from '../../src/artale/state.js';
 
-async function runEntry(t, { entry = 'index.js', args = [], time = '2026-11-17T09:20:00+08:00', stopAfter = 1 } = {}) {
+// categories 為設定檔的 newsCategories；列表頁只有一篇 2026-11-16 的舊公告（已通知過、內容未變），不論分類都回覆同一份列表。
+async function runEntry(t, { entry = 'index.js', args = [], time = '2026-11-17T09:20:00+08:00', stopAfter = 1, categories = ['update'] } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'dcwebhook-entry-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const stateFile = path.join(dir, 'state.json');
@@ -56,7 +57,7 @@ syncBuiltinESMExports();
   const configFile = path.join(dir, 'artale-config.js');
   await writeFile(configFile, `export default ${JSON.stringify({
     webhooks: [{ url: 'https://discord.com/api/webhooks/111/testToken' }],
-    newsCategories: ['update'],
+    newsCategories: categories,
     schedule: { days: '2', start: '08:20', end: '17:20', intervalMinutes: 60, timeZone: 'Asia/Taipei' },
     files: { state: stateFile, discordMessages: historyFile },
   })};`);
@@ -88,10 +89,17 @@ test('單次執行加 --category 時只處理指定分類，不修改設定檔�
   });
 });
 
-test('單次執行加 --window 時維持區間檢查，不讀取區間外正文', async t => {
-  const result = await runEntry(t, { args: ['--window'] });
+test('單次執行加 --window 時，商城等其他分類維持區間檢查，不讀取區間外正文', async t => {
+  const result = await runEntry(t, { args: ['--window'], categories: ['bm'] });
+  assert.deepEqual(result.categories, ['bm']);
   assert.deepEqual(result.pages, [1]);
   assert.deepEqual(result.details, []);
+});
+
+test('單次執行加 --window 時，版本更新仍比對第一頁最新公告（不限制回溯分鐘數），內容未變不重發', async t => {
+  const result = await runEntry(t, { args: ['--window'] });
+  assert.deepEqual(result.pages, [1]);
+  assert.deepEqual(result.details, ['/tw/news/old']);
 });
 
 test('排程在時段外啟動也立即檢查一次第一頁', async t => {
@@ -100,8 +108,14 @@ test('排程在時段外啟動也立即檢查一次第一頁', async t => {
   assert.deepEqual(result.details, ['/tw/news/old']);
 });
 
-test('排程在時段內只做一次啟動檢查，下一輪恢復區間檢查且仍只讀第一頁', async t => {
+test('排程在時段內只做一次啟動檢查，下一輪商城等其他分類恢復區間檢查且仍只讀第一頁', async t => {
+  const result = await runEntry(t, { entry: 'scheduler.js', time: '2026-11-17T09:19:59+08:00', stopAfter: 2, categories: ['bm'] });
+  assert.deepEqual(result.pages, [1, 1]);
+  assert.deepEqual(result.details, ['/tw/news/old'], '只有啟動檢查讀取區間外的舊公告');
+});
+
+test('排程每一輪都比對版本更新第一頁最新公告，以偵測舊文更正，且仍只讀第一頁', async t => {
   const result = await runEntry(t, { entry: 'scheduler.js', time: '2026-11-17T09:19:59+08:00', stopAfter: 2 });
   assert.deepEqual(result.pages, [1, 1]);
-  assert.deepEqual(result.details, ['/tw/news/old']);
+  assert.deepEqual(result.details, ['/tw/news/old', '/tw/news/old'], '啟動檢查與下一輪都讀取舊公告比對內容');
 });

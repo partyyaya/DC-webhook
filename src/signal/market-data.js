@@ -20,7 +20,7 @@
  *   美股：Yahoo Finance「Most Actives」中成交金額最大、股價 5 美元以上的股票
  */
 import { analyzeCandles, isDowntrend, isUptrend } from './indicators.js';
-import { AUTO_CANDIDATES, INTERVALS, isMarketEnabled, MARKETS, STALE_DAYS } from './markets.js';
+import { AUTO_CANDIDATES, autoPickLimit, INTERVALS, isMarketEnabled, MARKETS, STALE_DAYS } from './markets.js';
 import { logError } from '../shared/log.js';
 import { normalizeSymbol, SYMBOL_RULES } from '../shared/symbols.js';
 
@@ -465,18 +465,22 @@ async function mapLimit(items, limit, fn) {
 
 /**
  * 取得每個要分析的市場的行情資料並計算指標。單一標的失敗不影響其他標的。
+ * 指定代號與 AUTO 可以混用：指定的代號都交給 AI 判斷；AUTO 從候選中排除已指定的代號，
+ * 只把趨勢明確的候選交給 AI 挑選，最多 autoLimit 個（不超過剩下的卡片名額）。
  *
- * @param {object} markets 設定檔的市場設定：{crypto, tw, us}，每個為 {auto, symbols, interval}
+ * @param {object} markets 設定檔的市場設定：{crypto, tw, us}，每個為 {auto, symbols, interval, allowShort}
  * @param {object} options
  * @param {number} options.now 目前時間（毫秒）
  * @param {number} [options.timeoutMs] 每個請求的逾時時間
  * @returns {Promise<object[]>} 每個市場：
- *   items    要交給 AI 判斷的標的 {symbol, name, source, ticker, adjusted, price, priceTime, shortable, snapshot}（AUTO 只含通過趨勢篩選的）；
- *            shortable 為能否放空：true／false，無法確認時為 null，不可做空的市場為 false
- *   loaded   成功取得資料的標的數量
- *   errors   指定的標的中無法取得資料的 {symbol, message}（會顯示在 Discord）
- *   failure  AUTO 無法取得候選標的、或所有候選都失敗時的原因（會顯示在 Discord）
- *   candidates AUTO 的候選數量
+ *   items      指定代號中成功取得資料的標的（每個都要 AI 回覆）
+ *   autoItems  AUTO 中通過趨勢篩選的候選（由 AI 挑選）
+ *   標的格式為 {symbol, name, source, ticker, adjusted, price, priceTime, shortable, snapshot}；
+ *   shortable 為能否放空：true／false，無法確認時為 null，不可做空的市場為 false
+ *   errors     指定代號中無法取得資料的 {symbol, message}（會顯示在 Discord）
+ *   failure    AUTO 無法取得候選標的、或所有候選都失敗時的原因（會顯示在 Discord）
+ *   candidates AUTO 的候選數量；autoLimit AUTO 最多挑選幾個；mixed 是否與指定代號混用
+ *   loaded     成功取得資料的標的數量（指定代號與 AUTO 合計）
  */
 export async function prepareMarkets(markets, { now, timeoutMs }) {
   const enabled = MARKETS.filter((market) => markets[market.key] && isMarketEnabled(markets[market.key]));
@@ -492,8 +496,10 @@ export async function prepareMarkets(markets, { now, timeoutMs }) {
   const result = [];
   for (const market of enabled) {
     const { auto, symbols, interval, allowShort = false } = markets[market.key];
-    // candidates：AUTO 的候選數量；loaded：成功取得資料的標的數量；items：要交給 AI 判斷的標的（AUTO 為通過趨勢篩選的）
-    const entry = { key: market.key, interval, auto, allowShort, candidates: 0, loaded: 0, items: [], errors: [], failure: null };
+    const entry = {
+      key: market.key, interval, auto, allowShort, mixed: auto && symbols.length > 0, autoLimit: auto ? autoPickLimit(symbols.length) : 0,
+      candidates: 0, loaded: 0, items: [], autoItems: [], errors: [], failure: null,
+    };
     result.push(entry);
     // 可以做空時，確認哪些標的能放空（null 代表無法確認）
     const shortable = allowShort
@@ -506,51 +512,56 @@ export async function prepareMarkets(markets, { now, timeoutMs }) {
       return shortable.has(market.key === 'crypto' ? `${symbol}USDT` : symbol);
     };
 
-    let targets;
-    if (auto) {
-      try {
-        if (market.key === 'tw' && !twList) throw new Error('無法取得台股清單');
-        targets = await fetchAutoCandidates(market.key, { timeoutMs, twList });
-        if (targets.length === 0) throw new Error('沒有候選標的');
-      } catch (err) {
-        entry.failure = `無法取得 AUTO 的候選標的：${err.message}`;
-        logError(`[${market.name}] ${entry.failure}`);
-        continue;
-      }
-      entry.candidates = targets.length;
-    } else {
-      const info = (symbol) => twList?.find((row) => row.symbol === symbol);
-      targets = symbols.map((symbol) => ({ symbol, name: info(symbol)?.name ?? '', exchange: info(symbol)?.exchange }));
-    }
-
-    const loaded = await mapLimit(targets, CONCURRENCY, async (target) => {
-      try {
-        const data = market.key === 'crypto'
-          ? await fetchCryptoCandles(target.symbol, interval, { now, timeoutMs })
-          : await fetchStockCandles(market.key, target.symbol, interval, { now, timeoutMs, exchange: target.exchange });
-        const { candles, ...rest } = data;
-        const lastTime = candles.at(-1)?.time;
-        if (lastTime !== undefined && now - lastTime > STALE_DAYS[market.key] * 24 * 60 * 60 * 1000) {
-          throw new Error(`最後一根已收盤 K 線為 ${new Date(lastTime).toISOString().slice(0, 10)}，資料可能已停止更新`);
+    // 取得多個標的的 K 線並計算指標；單一標的失敗只記錄錯誤
+    const load = async (targets) => {
+      const rows = await mapLimit(targets, CONCURRENCY, async (target) => {
+        try {
+          const data = market.key === 'crypto'
+            ? await fetchCryptoCandles(target.symbol, interval, { now, timeoutMs })
+            : await fetchStockCandles(market.key, target.symbol, interval, { now, timeoutMs, exchange: target.exchange });
+          const { candles, ...rest } = data;
+          const lastTime = candles.at(-1)?.time;
+          if (lastTime !== undefined && now - lastTime > STALE_DAYS[market.key] * 24 * 60 * 60 * 1000) {
+            throw new Error(`最後一根已收盤 K 線為 ${new Date(lastTime).toISOString().slice(0, 10)}，資料可能已停止更新`);
+          }
+          return { item: { symbol: target.symbol, name: target.name ?? '', ...rest, shortable: canShort(target.symbol), snapshot: analyzeCandles(candles) } };
+        } catch (err) {
+          logError(`[${market.name} ${target.symbol}] ${err.message}`);
+          return { error: { symbol: target.symbol, message: err.message } };
         }
-        return { item: { symbol: target.symbol, name: target.name ?? '', ...rest, shortable: canShort(target.symbol), snapshot: analyzeCandles(candles) } };
-      } catch (err) {
-        logError(`[${market.name} ${target.symbol}] ${err.message}`);
-        return { error: { symbol: target.symbol, message: err.message } };
-      }
-    });
-    const items = loaded.filter((row) => row.item).map((row) => row.item);
-    const errors = loaded.filter((row) => row.error).map((row) => row.error);
-    entry.loaded = items.length;
-    if (!auto) {
+      });
+      return { items: rows.filter((row) => row.item).map((row) => row.item), errors: rows.filter((row) => row.error).map((row) => row.error) };
+    };
+
+    // 指定的代號：每個都交給 AI 判斷，失敗的顯示在 Discord
+    if (symbols.length > 0) {
+      const info = (symbol) => twList?.find((row) => row.symbol === symbol);
+      const { items, errors } = await load(symbols.map((symbol) => ({ symbol, name: info(symbol)?.name ?? '', exchange: info(symbol)?.exchange })));
       entry.items = items;
       entry.errors = errors;
+      entry.loaded += items.length;
+    }
+    if (!auto) continue;
+
+    // AUTO：排除已指定的代號；候選失敗只記錄在終端機，全部失敗時才顯示在 Discord
+    let targets;
+    try {
+      if (market.key === 'tw' && !twList) throw new Error('無法取得台股清單');
+      targets = (await fetchAutoCandidates(market.key, { limit: AUTO_CANDIDATES + symbols.length, timeoutMs, twList }))
+        .filter((target) => !symbols.includes(target.symbol))
+        .slice(0, AUTO_CANDIDATES);
+      if (targets.length === 0) throw new Error('沒有候選標的');
+    } catch (err) {
+      entry.failure = `無法取得 AUTO 的候選標的：${err.message}`;
+      logError(`[${market.name}] ${entry.failure}`);
       continue;
     }
-    // AUTO：候選失敗只記錄在終端機，全部失敗時才顯示在 Discord；只把趨勢明確的候選交給 AI：
-    // 趨勢向上（可以做多），以及可以做空時趨勢向下、而且不確定無法放空的標的
+    entry.candidates = targets.length;
+    const { items, errors } = await load(targets);
+    entry.loaded += items.length;
     if (items.length === 0) entry.failure = `所有候選標的都無法取得行情資料（${errors[0]?.message ?? '未知原因'}）`;
-    entry.items = items.filter((item) => isUptrend(item.snapshot) || (allowShort && item.shortable !== false && isDowntrend(item.snapshot)));
+    // 只把趨勢明確的候選交給 AI：趨勢向上（可以做多），以及可以做空時趨勢向下、而且不確定無法放空的標的
+    entry.autoItems = items.filter((item) => isUptrend(item.snapshot) || (allowShort && item.shortable !== false && isDowntrend(item.snapshot)));
   }
   return result;
 }
