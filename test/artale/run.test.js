@@ -124,22 +124,22 @@ test('商城拆分後中途發送失敗，已成功的訊息仍有可撤回的 I
   await assert.rejects(access(config.stateFile), { code: 'ENOENT' });
 });
 
-test('維護公告發布一則訊息，內文只有維護時間並記錄為 maintenance', async (t) => {
-  const { posts } = await setup(t, 'maintenance', JSON.stringify({ periods: ['11/24 07:00～12:00（GMT+8）'] }), {
+test('維護公告發布一則訊息，先列維護時間再列內容摘要並記錄為 maintenance', async (t) => {
+  const { posts } = await setup(t, 'maintenance', JSON.stringify({ periods: ['11/24 07:00～12:00（GMT+8）'], summary: ['修正任務異常。', '擴充寵物欄位，可攜帶三隻寵物。'] }), {
     content: '維護時間：11/24 07:00～12:00（GMT+8）。另有補償與遊戲更新項目。',
   });
   await runOnce();
   assert.equal(posts.length, 1);
-  assert.equal(posts[0].embeds[0].description, '維護時間：11/24 07:00～12:00（GMT+8）');
+  assert.equal(posts[0].embeds[0].description, '維護時間：11/24 07:00～12:00（GMT+8）\n\n維護內容：\n\n- 修正任務異常。\n\n- 擴充寵物欄位，可攜帶三隻寵物。');
   assert.equal(posts[0].embeds[0].url, 'https://artale.live/tw/news/latest');
   assert.equal((await listPosts(config.discordMessagesFile))[0].category, 'maintenance');
   assert.equal((await notified()).length, 1);
 });
 
-test('維護摘要失敗的預覽不顯示公告全文，正式模式不發送或記錄', async (t) => {
-  const { posts } = await setup(t, 'maintenance', 'invalid', { content: '補償獎勵與更新項目不應顯示' });
+test('維護摘要失敗的預覽標示時間未取得並顯示原文開頭，正式模式不發送或記錄', async (t) => {
+  const { posts } = await setup(t, 'maintenance', 'invalid', { content: '維護內容包含例行檢查與補償說明。' });
   const [preview] = await runOnce({ dryRun: true, force: true });
-  assert.equal(preview.messages[0].embeds[0].description, '維護時間：尚未取得（預覽模式）');
+  assert.equal(preview.messages[0].embeds[0].description, '維護時間：尚未取得（預覽模式）\n\n維護內容：\n（AI 摘要失敗，以下為公告開頭內容）\n\n維護內容包含例行檢查與補償說明。');
   await assert.rejects(runOnce(), /分類檢查失敗/);
   assert.equal(posts.length, 0);
   await assert.rejects(access(config.discordMessagesFile), { code: 'ENOENT' });
@@ -147,7 +147,7 @@ test('維護摘要失敗的預覽不顯示公告全文，正式模式不發送�
 });
 
 const replies = {
-  maintenance: JSON.stringify({ periods: ['11/24 07:00～12:00'] }),
+  maintenance: JSON.stringify({ periods: ['11/24 07:00～12:00'], summary: ['新增皇家騎士團職業。'] }),
   update: '- 版本更新項目',
   bm: JSON.stringify({ products: [{ name: '禮包', price: '800 WC', contents: ['道具'], image: null, links: [],
     purchaseConditions: '', purchaseLimit: '', salePeriod: '' }], otherChanges: [] }),

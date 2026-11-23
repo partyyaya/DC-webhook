@@ -267,13 +267,13 @@ async function notifyIfChanged({ category, label, announcement }, state, { dryRu
 /**
  * 呼叫設定的 AI（Codex 或 Claude）產生摘要。
  *   - 購物商場（bm）：要求 AI 回覆 SHOP_SCHEMA 格式的 JSON，解析後回傳商品資料。
- *   - 維護（maintenance）：要求 AI 回覆 MAINTENANCE_SCHEMA，僅組成維護時間內文。
+ *   - 維護（maintenance）：要求 AI 回覆 MAINTENANCE_SCHEMA，組成維護時間與內容摘要。
  *   - 其他分類：回傳 AI 寫好的文字摘要。
  * 正式模式下 AI 失敗（或回覆格式不符）就直接拋錯（不發送、不記錄）；
  * 預覽模式下則改用預覽內容代替，讓還沒安裝 AI CLI 時也能看到訊息長相。
  *
  * @param {object} announcement 公告資料（含標題、內文等）
- * @param {string} category 分類代碼，決定使用購物商場、維護時間或版本更新格式
+ * @param {string} category 分類代碼，決定使用購物商場、維護時間與內容或版本更新格式
  * @param {boolean} dryRun 是否為預覽模式
  * @param {(message: string) => void} say 帶分類名稱的紀錄輸出函式
  * @returns {Promise<string | {products: object[], otherChanges: string[]}>} 文字摘要或購物商場的商品資料
@@ -295,8 +295,8 @@ async function summarize(announcement, category, dryRun, say) {
   } catch (err) {
     if (!dryRun) throw err;
     say(`${aiLabel(config.ai.provider)} 摘要失敗，--dry-run 改用預覽內容代替：${err.message}`);
-    // 維護預覽失敗時也不能回退成公告全文，以免混入時間以外的內容。
-    if (isMaintenance) return '維護時間：尚未取得（預覽模式）';
+    // 維護預覽保留時間與內容兩個區塊；無法確認時間時不自行推測。
+    if (isMaintenance) return `維護時間：尚未取得（預覽模式）\n\n維護內容：\n（AI 摘要失敗，以下為公告開頭內容）\n\n${announcement.content.slice(0, 1500)}`;
     return isShop
       ? previewShopSummary(announcement.content)
       : `（AI 摘要失敗，以下為公告開頭內容）\n\n${announcement.content.slice(0, 1500)}`;

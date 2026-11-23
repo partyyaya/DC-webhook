@@ -3,7 +3,7 @@
  *
  * 依分類產生三種摘要：
  *   - 版本更新（購物商場、維護以外的分類）：AI 直接寫出 Markdown 文字，放進一張 Discord 卡片。
- *   - 維護：AI 依 MAINTENANCE_SCHEMA 擷取維護時段，只輸出維護時間。
+ *   - 維護：AI 依 MAINTENANCE_SCHEMA 擷取維護時段與內容摘要，依序顯示時間與內容。
  *   - 購物商場：AI 依 SHOP_SCHEMA 回覆 JSON（每個商品的名稱、價格、內容物、圖片、連結與購買資訊），
  *     再由 format.js 組成「先圖片、再文字」的多張卡片。
  *
@@ -23,15 +23,21 @@ const UPDATE_PROMPT = {
   ],
 };
 
-// 維護公告只擷取時間，不將補償、活動、維護項目等其他資訊放入 Discord 內文。
+// 維護公告分別擷取時間與內容摘要，避免將活動、補償日期混為維護時間。
 const MAINTENANCE_PROMPT = {
-  intro: '你是 Artale（楓之谷世界）官方公告的整理助手。請閱讀下方維護公告，以繁體中文（台灣用語）擷取「維護時間」，填入指定的 JSON 欄位。',
+  intro: '你是 Artale（楓之谷世界）官方公告的整理助手。請閱讀下方維護公告，以繁體中文（台灣用語）整理「維護時間與內容摘要」，填入指定的 JSON 欄位。',
   rules: [
     '- periods：維護時段的文字陣列，每個時段一筆，保留日期、開始時間、結束時間及原文註明的時區；未提供的年份、時間或時區不要自行推算或補上。',
     '- 有更正、延長、提前結束或實際完成時間時，採用公告最新說明；明確尚未確定的結束時間可保留「結束時間未定／延長中」等原意。',
     '- 有多個適用平台或服務的維護時段時分別列出，可用簡短的服務名稱區別，但只填與維護時間有關的資訊。',
-    '- 不要填入維護項目、原因、補償、活動、注意事項、頁面連結或其他說明；不要把公告發布時間、獎勵領取日期或活動時間當成維護時間。',
+    '- periods 只填維護時間，不要把公告發布時間、獎勵領取日期或活動時間當成維護時間。',
     '- 公告沒有提供任何維護時間時，periods 填空陣列，不要臆測。',
+    '- summary：內容摘要的文字陣列，只整理玩家實際會遇到的遊戲內容異動，例如新職業、新地區、技能調整、角色／裝備／寵物欄位擴充、副本賽季、序號與活動、掉落率變更、具體錯誤修正；每項一句、不超過 80 字，保留重要日期、時間、數量與限制。',
+    '- 公告有「維護內容／更新項目」等清單時，優先依該清單的項目與順序整理，保留具體內容，不要混入前言或結尾的制式提醒。公告明確列出具體補償道具、數量或領取條件時可保留；沒有實質資訊的補償預告省略。',
+    '- 排除維護目的與客套話，例如「為提供更穩定的服務」「感謝支持」「造成不便敬請見諒」；排除一般維護提醒，例如「維護時間可能調整／另行公告」「適用 PC／手機版」「維護期間無法登入」「請提前登出」「登入時會顯示錯誤／強制斷線」。',
+    '- 沒有說明具體對象與變更細節的籠統項目，例如「其他遊戲內容優化」「系統調整」「例行檢查」，一律省略；有明確內容的修正或調整才保留。',
+    '- summary 不要重複已填入 periods 的維護時段，不要加入問候、前言、結語或自行推測的內容；每項直接填摘要文字，不要加條列符號或標題。',
+    '- 公告未提供時間以外的實質內容時，summary 填空陣列；摘要合計不超過 2000 字。',
   ],
 };
 
@@ -96,8 +102,11 @@ export const SHOP_SCHEMA = {
 
 export const MAINTENANCE_SCHEMA = {
   type: 'object',
-  properties: { periods: { type: 'array', items: { type: 'string' } } },
-  required: ['periods'],
+  properties: {
+    periods: { type: 'array', items: { type: 'string' } },
+    summary: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['periods', 'summary'],
   additionalProperties: false,
 };
 
@@ -109,13 +118,13 @@ const COMMON_RULES = [
 
 /**
  * 組出要交給 AI 的提示詞：依分類選擇撰寫規則 + 公告標題、分類、發布時間 + 公告全文。
- * 想調整 Discord 訊息的內容或格式，修改上方的 UPDATE_PROMPT、SHOP_PROMPT、COMMON_RULES 即可。
+ * 想調整 Discord 訊息的內容或格式，修改上方的 UPDATE_PROMPT、MAINTENANCE_PROMPT、SHOP_PROMPT、COMMON_RULES 即可。
  *
  * 提示詞只依分類決定，與比對結果（新公告／公告更新）無關，同一篇公告的摘要可共用給所有 Webhook；
  * 「（公告已更新）」等標示由 format.js 依各 Webhook 的比對結果加上，不交給 AI 判斷。
  *
  * @param {object} announcement 公告資料（title、category、publishedAt、content）
- * @param {string} [category] bm 使用商品 JSON，maintenance 使用維護時段 JSON，其他使用版本更新格式
+ * @param {string} [category] bm 使用商品 JSON，maintenance 使用維護時段與內容摘要 JSON，其他使用版本更新格式
  * @returns {string} 提示詞
  */
 export function buildSummaryPrompt(announcement, category) {
@@ -143,15 +152,19 @@ export function buildSummaryPrompt(announcement, category) {
   return lines.join('\n');
 }
 
-/** 只使用維護時段欄位組成內文，避免其他公告內容被帶入。 */
+/** 先列維護時間，再以條列呈現內容摘要；去除空白與重複項目。 */
 export function parseMaintenanceSummary(text) {
   let data;
-  try { data = JSON.parse(text); } catch { throw new Error('AI 回覆的維護時間不是有效的 JSON'); }
-  if (!data || !Array.isArray(data.periods) || data.periods.some(period => typeof period !== 'string')) {
-    throw new Error('AI 回覆的維護時間格式不符');
+  try { data = JSON.parse(text); } catch { throw new Error('AI 回覆的維護摘要不是有效的 JSON'); }
+  if (!data || [data.periods, data.summary].some(list => !Array.isArray(list) || list.some(item => typeof item !== 'string'))) {
+    throw new Error('AI 回覆的維護摘要格式不符');
   }
-  const periods = [...new Set(data.periods.map(period => period.trim()).filter(Boolean))];
-  return periods.length > 0 ? periods.map(period => `維護時間：${period}`).join('\n') : '維護時間：公告未註明';
+  const clean = (list) => [...new Set(list.map(item => item.replace(/\s+/g, ' ').trim()).filter(Boolean))];
+  const periods = clean(data.periods);
+  const summary = clean(data.summary);
+  const time = periods.length > 0 ? periods.map(period => `維護時間：${period}`).join('\n') : '維護時間：公告未註明';
+  const content = summary.length > 0 ? `維護內容：\n\n${summary.map(item => `- ${item}`).join('\n\n')}` : '維護內容：公告未註明';
+  return `${time}\n\n${content}`;
 }
 
 /**

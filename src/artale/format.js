@@ -3,7 +3,7 @@
  *
  * 在頻道中顯示的樣子：
  *   - 版本更新：一張卡片，包含標題（可點擊開啟官網公告）、項目之間空一行的摘要內文與底部說明。
- *   - 維護：一張公告卡片，內文只顯示維護時間。
+ *   - 維護：一張公告卡片，內文先顯示維護時間，再列出內容摘要。
  *   - 購物商場：先一張公告標題卡片，接著每個商品「先圖片卡片、再文字卡片」，
  *     最後是「其他異動」卡片；底部說明放在最後一張文字卡片。
  *     卡片太多時會拆成好幾則訊息依序發送。
@@ -29,9 +29,9 @@ const NO_MENTIONS = { parse: [] };
  *
  * @param {object} announcement 公告資料
  * @param {string | {products: object[], otherChanges: string[]}} summary
- *   文字摘要（版本更新或維護時間）或購物商場的商品資料（見 summarize.js 的 parseShopSummary）
+ *   文字摘要（版本更新或維護時間與內容）或購物商場的商品資料（見 summarize.js 的 parseShopSummary）
  * @param {'new' | 'updated' | 'unchanged'} kind 比對結果，決定標題標籤與是否註明（公告已更新）
- * @param {string} [category] 分類代碼；維護公告只顯示維護時間，不加（公告已更新）
+ * @param {string} [category] 分類代碼；維護公告不加（公告已更新），以標題標籤識別
  * @returns {object[]} 依序發送的 Discord Webhook 請求內容（每個元素是一則訊息）
  */
 export function buildDiscordMessages(announcement, summary, kind, category) {
@@ -57,7 +57,7 @@ function buildHeaderEmbed(announcement, kind) {
 }
 
 /**
- * 組出版本更新或維護公告的訊息：一張公告卡片，內文為文字摘要或維護時間。
+ * 組出版本更新或維護公告的訊息：一張公告卡片，內文為文字摘要或維護時間與內容。
  *
  * @param {object} announcement 公告資料（title、url、category、publishedAt、thumbnail）
  * @param {string} summary AI 產生的摘要

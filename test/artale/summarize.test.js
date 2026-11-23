@@ -26,27 +26,37 @@ test('版本更新公告：整理更新項目，每項 50 字以內並附連結'
   assert.match(prompt, /"""\n更新內容\n"""/);
 });
 
-test('維護公告只擷取維護時段，不在內文加入其他文字', () => {
+test('維護公告分別擷取時段與具體遊戲異動，排除維護套話與一般連線提醒', () => {
   const announcement = { title: '維護公告', category: '維護', publishedAt: '2026.11.17 08:00', content: '維護及補償資訊' };
   const prompt = buildSummaryPrompt(announcement, 'maintenance');
   assert.match(prompt, /periods：/);
+  assert.match(prompt, /summary：/);
   assert.match(prompt, /日期、開始時間、結束時間/);
   assert.match(prompt, /不要把公告發布時間/);
-  assert.match(prompt, /補償/);
+  assert.match(prompt, /新職業、新地區、技能調整/);
+  assert.match(prompt, /具體補償道具、數量或領取條件/);
+  assert.match(prompt, /優先依該清單的項目與順序整理/);
+  assert.match(prompt, /排除維護目的與客套話/);
+  assert.match(prompt, /維護期間無法登入/);
+  assert.match(prompt, /其他遊戲內容優化/);
+  assert.match(prompt, /不超過 80 字/);
+  assert.match(prompt, /summary 不要重複已填入 periods 的維護時段/);
   assert.doesNotMatch(prompt, /這次版本更新了什麼|每個更新項目|（公告已更新）/);
 });
 
-test('維護摘要只輸出時間欄位，去除空白及重複時段', () => {
+test('維護摘要先列時間再列內容，去除空白及重複項目；未提供欄位內容時明確標示', () => {
   assert.equal(parseMaintenanceSummary(JSON.stringify({
     periods: [' 11/24 07:00～12:00（GMT+8） ', '11/24 07:00～12:00（GMT+8）', '', '平台維護：11/24 06:00～07:00'],
-    compensation: '不應顯示的補償內容',
-  })), '維護時間：11/24 07:00～12:00（GMT+8）\n維護時間：平台維護：11/24 06:00～07:00');
-  assert.equal(parseMaintenanceSummary('{"periods":[]}'), '維護時間：公告未註明');
+    summary: [' 修正任務異常。 ', '', '修正任務異常。', '補償：經驗加倍券 2 張。\n維護後發放。'],
+  })), '維護時間：11/24 07:00～12:00（GMT+8）\n維護時間：平台維護：11/24 06:00～07:00\n\n維護內容：\n\n- 修正任務異常。\n\n- 補償：經驗加倍券 2 張。 維護後發放。');
+  assert.equal(parseMaintenanceSummary('{"periods":[],"summary":[]}'), '維護時間：公告未註明\n\n維護內容：公告未註明');
+  assert.equal(parseMaintenanceSummary(JSON.stringify({ periods: [], summary: ['新增皇家騎士團職業。'] })), '維護時間：公告未註明\n\n維護內容：\n\n- 新增皇家騎士團職業。');
+  assert.equal(parseMaintenanceSummary(JSON.stringify({ periods: ['11/24 07:00～12:00'], summary: [' ', ''] })), '維護時間：11/24 07:00～12:00\n\n維護內容：公告未註明');
 });
 
-test('維護摘要不是時間 JSON 格式時拋錯，不回傳完整公告', () => {
+test('維護摘要不是 JSON、缺少時間或摘要欄位、欄位型別錯誤時拋錯', () => {
   assert.throws(() => parseMaintenanceSummary('維護公告全文'), /不是有效的 JSON/);
-  for (const data of [null, {}, { periods: '時間' }, { periods: [123] }]) {
+  for (const data of [null, {}, { periods: [], summary: '內容' }, { periods: [123], summary: [] }, { periods: [] }, { summary: [] }, { periods: [], summary: [123] }]) {
     assert.throws(() => parseMaintenanceSummary(JSON.stringify(data)), /格式不符/);
   }
 });

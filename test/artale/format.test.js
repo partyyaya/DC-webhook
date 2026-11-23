@@ -49,8 +49,9 @@ test('版本更新項目之間恰好空一行，公告更新時由程式在最�
 });
 
 test('維護公告更新時不在內文加入（公告已更新），只有標題標籤不同', () => {
-  const [message] = buildDiscordMessages(announcement, '維護時間：11/18 08:00～12:00', 'updated', 'maintenance');
-  assert.equal(message.embeds[0].description, '維護時間：11/18 08:00～12:00');
+  const summary = '維護時間：11/18 08:00～12:00\n\n維護內容：\n\n- 修正任務異常。\n\n- 擴充角色欄位。';
+  const [message] = buildDiscordMessages(announcement, summary, 'updated', 'maintenance');
+  assert.equal(message.embeds[0].description, summary);
   assert.match(message.embeds[0].title, /^【公告更新】/);
 });
 
