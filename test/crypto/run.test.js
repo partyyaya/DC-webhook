@@ -16,8 +16,8 @@ const NEWS = {
   economy: [{ title: '聯準會維持利率', summary: '摘要', source: 'Reuters', url: 'https://example.com/fed', publishedAt: '2026-11-18 03:00' }],
   crypto: [{ title: '比特幣反彈', summary: '摘要', source: 'CoinDesk', url: 'https://example.com/btc', publishedAt: '2026-11-18 06:00', coins: ['BTC'] }],
 };
-const ECONOMY = (date) => `## 🇺🇸 美國經濟新聞｜${date}`;
-const CRYPTO = (date) => `## 🪙 虛擬貨幣新聞｜${date}`;
+const ECONOMY = (date) => `# 經濟與虛擬貨幣新聞｜${date}\n\n## 🇺🇸 美國經濟新聞`;
+const CRYPTO = () => '## 🪙 虛擬貨幣新聞';
 
 /** 組出 config.targets 中的一個 Webhook；profile 為名稱與頭像變更提醒的設定。 */
 const target = (webhookId, { name = '', profile = {} } = {}) => ({
@@ -105,7 +105,7 @@ test('第一次發送兩則訊息並記錄；同一天再執行略過，--force 
   const { calls, codexArgs, codexCount } = await setup(t);
   const now = taipei('2026-11-18 08:00');
   assert.equal((await runDaily({ now })).status, 'sent');
-  assert.deepEqual(calls, [`POST A ${ECONOMY('2026-11-18（週三）')}`, `POST A ${CRYPTO('2026-11-18（週三）')}`]);
+  assert.deepEqual(calls, [`POST A ${ECONOMY('2026-11-18（週三）')}`, `POST A ${CRYPTO()}`]);
   assert.deepEqual(await entries(), { [A]: { completedDate: '2026-11-18', messageIds: ['901', '902'] } });
   const args = await codexArgs();
   assert.equal(args[args.indexOf('-c') + 1], 'web_search="live"');
@@ -181,7 +181,7 @@ test('多個 Webhook：新聞只搜尋一次，各自發送、各自記錄，隔
   await runDaily({ now: taipei('2026-11-19 08:00') });
   assert.equal(await codexCount(), 2);
   assert.deepEqual(calls.map((call) => call.split(' ').slice(0, 3).join(' ')), [
-    'DELETE A 901', 'DELETE A 902', `POST A ##`, `POST A ##`, 'DELETE B 903', 'DELETE B 904', `POST B ##`, `POST B ##`,
+    'DELETE A 901', 'DELETE A 902', `POST A #`, `POST A ##`, 'DELETE B 903', 'DELETE B 904', `POST B #`, `POST B ##`,
   ]);
 });
 
@@ -238,7 +238,7 @@ test('設定提醒文字時，先檢查 Webhook 名稱與頭像，變更提醒�
   calls.length = 0;
   await runDaily({ now: taipei('2026-11-19 08:00') });
   assert.deepEqual(calls.slice(0, 6), ['GET A', 'POST A 換頭像了\n改名為 New Bot', 'DELETE A 901', 'DELETE A 902',
-    `POST A ${ECONOMY('2026-11-19（週四）')}`, `POST A ${CRYPTO('2026-11-19（週四）')}`]);
+    `POST A ${ECONOMY('2026-11-19（週四）')}`, `POST A ${CRYPTO()}`]);
   assert.deepEqual((await entries())[A].messageIds, ['906', '907']);
 });
 

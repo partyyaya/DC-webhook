@@ -109,16 +109,17 @@ test('每個市場一則訊息，卡片底部顯示股票代號；沒有新聞�
   const news = parseNews(reply({ tw: [item(1, ['2330', '2317'])], us: [item(2, [], { source: '', publishedAt: '' })] }), DEFAULTS);
   const messages = buildDiscordMessages(news, { dateLabel: '2026-11-20（週五）' });
   assert.equal(messages.length, 2);
-  assert.equal(messages[0].content, '## 🇹🇼 台股新聞｜2026-11-20（週五）');
+  assert.equal(messages[0].content, '# 股票新聞｜2026-11-20（週五）\n\n## 🇹🇼 台股新聞');
   assert.deepEqual(messages[0].embeds[0], {
     title: '1. 新聞1', url: 'https://example.com/1', color: 0xe63946, description: '摘要1', footer: { text: '2330・2317｜經濟日報｜2026-11-20 07:30' },
   });
-  assert.equal(messages[1].content, '## 🇺🇸 美股新聞｜2026-11-20（週五）');
+  assert.equal(messages[1].content, '## 🇺🇸 美股新聞');
   assert.deepEqual(messages[1].embeds[0], { title: '1. 新聞2', url: 'https://example.com/2', color: 0x1f6feb, description: '摘要2' });
 
   const usOnly = buildDiscordMessages({ tw: [], us: news.us }, { dateLabel: '2026-11-20（週五）' });
   assert.equal(usOnly.length, 1);
-  assert.match(usOnly[0].content, /美股/);
+  assert.equal(usOnly[0].content, '# 股票新聞｜2026-11-20（週五）\n\n## 🇺🇸 美股新聞');
+  assert.deepEqual(buildDiscordMessages({ tw: [], us: [] }, { dateLabel: '2026-11-20（週五）' }), []);
 });
 
 test('篇數上限 10 則且內容超長時，仍符合 Discord 每則訊息 10 張卡片、6000 字的限制', () => {

@@ -87,18 +87,19 @@ export function selectByPriority(items, { priority, count, codesOf }) {
 
 /**
  * 組出 Discord 訊息：每個分類一則訊息，標題放在訊息文字，每篇新聞一張卡片（標題可點擊開啟原文）；
- * 沒有新聞的分類不發送。
+ * 共用標題與日期只放在第一個有新聞的分類最上方；沒有新聞的分類不發送。
  *
  * @param {Record<string, object[]>} news 各分類的新聞
  * @param {object} options
+ * @param {string} options.heading 整批新聞的共用標題
  * @param {Array<{key: string, heading: string, color: number, codesKey?: string}>} options.sections
  *   分類順序、訊息標題、卡片顏色；codesKey 為要顯示在卡片底部的代號欄位（例如 coins、stocks）
  * @param {string} options.dateLabel 訊息標題的日期，例如「2026-11-18（週三）」
  * @returns {Array<{content: string, embeds: object[]}>}
  */
-export function buildNewsMessages(news, { sections, dateLabel }) {
-  return sections.filter((section) => news[section.key]?.length > 0).map((section) => ({
-    content: `## ${section.heading}｜${dateLabel}`,
+export function buildNewsMessages(news, { heading, sections, dateLabel }) {
+  const messages = sections.filter((section) => news[section.key]?.length > 0).map((section) => ({
+    content: `## ${section.heading}`,
     embeds: news[section.key].map((item, index) => {
       // 卡片底部：代號、來源、發布時間，沒有的項目省略
       const codes = section.codesKey ? item[section.codesKey]?.join('・') : '';
@@ -112,6 +113,8 @@ export function buildNewsMessages(news, { sections, dateLabel }) {
       };
     }),
   }));
+  if (messages.length > 0) messages[0].content = `# ${heading}｜${dateLabel}\n\n${messages[0].content}`;
+  return messages;
 }
 
 /** 確認是 http(s) 網址，避免把無效或其他協定的連結放進 Discord 卡片。 */

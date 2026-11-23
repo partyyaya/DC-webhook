@@ -1,6 +1,6 @@
 /**
  * 股票訊息排版：把整理好的新聞組成 Discord 訊息。
- * 每個市場一則訊息：標題放在訊息文字，每篇新聞一張卡片（標題可點擊開啟原文），版面見 shared/news.js。
+ * 共用標題與日期放在最上方，各市場一則訊息、每篇新聞一張卡片（標題可點擊開啟原文），版面見 shared/news.js。
  */
 import { buildNewsMessages } from '../shared/news.js';
 
@@ -18,5 +18,5 @@ export const SECTIONS = [
  * @returns {Array<{content: string, embeds: object[]}>}
  */
 export function buildDiscordMessages(news, { dateLabel }) {
-  return buildNewsMessages(news, { sections: SECTIONS, dateLabel });
+  return buildNewsMessages(news, { heading: '股票新聞', sections: SECTIONS, dateLabel });
 }

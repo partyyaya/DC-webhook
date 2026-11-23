@@ -129,14 +129,15 @@ test('每個分類一則訊息，每篇新聞一張可點擊的卡片；沒有�
   const news = parseNews(JSON.stringify({ economy: [item(1, { source: '', publishedAt: '' })], crypto: [coin(2, ['BTC', 'ETH'])] }), DEFAULTS);
   const messages = buildDiscordMessages(news, { dateLabel: '2026-11-18（週三）' });
   assert.equal(messages.length, 2);
-  assert.equal(messages[0].content, '## 🇺🇸 美國經濟新聞｜2026-11-18（週三）');
+  assert.equal(messages[0].content, '# 經濟與虛擬貨幣新聞｜2026-11-18（週三）\n\n## 🇺🇸 美國經濟新聞');
   assert.deepEqual(messages[0].embeds, [{ title: '1. 新聞1', url: 'https://example.com/1', color: 0x1f6feb, description: '摘要1' }]);
-  assert.equal(messages[1].content, '## 🪙 虛擬貨幣新聞｜2026-11-18（週三）');
+  assert.equal(messages[1].content, '## 🪙 虛擬貨幣新聞');
   assert.deepEqual(messages[1].embeds[0].footer, { text: 'BTC・ETH｜Reuters｜2026-11-18 07:30' });
 
   const cryptoOnly = buildDiscordMessages({ economy: [], crypto: news.crypto }, { dateLabel: '2026-11-18（週三）' });
   assert.equal(cryptoOnly.length, 1);
-  assert.match(cryptoOnly[0].content, /虛擬貨幣/);
+  assert.equal(cryptoOnly[0].content, '# 經濟與虛擬貨幣新聞｜2026-11-18（週三）\n\n## 🪙 虛擬貨幣新聞');
+  assert.deepEqual(buildDiscordMessages({ economy: [], crypto: [] }, { dateLabel: '2026-11-18（週三）' }), []);
 });
 
 test('篇數上限 10 則且內容超長時，仍符合 Discord 每則訊息 10 張卡片、6000 字的限制', () => {

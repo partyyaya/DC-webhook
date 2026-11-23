@@ -56,7 +56,7 @@ process.stdin.setEncoding('utf8').on('data', (chunk) => (input += chunk)).on('en
 test('以網路搜尋取得台股與美股新聞，各發一則訊息並記錄，代號統一格式', async (t) => {
   const { posts, codexCall } = await setup(t);
   assert.equal((await runDaily({ now: taipei('2026-11-20 08:00') })).status, 'sent');
-  assert.deepEqual(posts.map((post) => post.content), ['## 🇹🇼 台股新聞｜2026-11-20（週五）', '## 🇺🇸 美股新聞｜2026-11-20（週五）']);
+  assert.deepEqual(posts.map((post) => post.content), ['# 股票新聞｜2026-11-20（週五）\n\n## 🇹🇼 台股新聞', '## 🇺🇸 美股新聞']);
   assert.equal(posts[0].embeds[0].footer.text, '2330｜經濟日報｜2026-11-19 14:00');
   assert.equal(posts[1].embeds[0].footer.text, 'NVDA｜Reuters｜2026-11-20 05:30');
   assert.deepEqual((await loadDigestState(config.stateFile)).targets, { [A]: { completedDate: '2026-11-20', messageIds: ['901', '902'] } });
@@ -72,7 +72,7 @@ test('台股篇數為 0 時只搜尋與發送美股', async (t) => {
   const { posts, codexCall } = await setup(t, { twCount: 0 });
   const result = await runDaily({ dryRun: true, now: taipei('2026-11-20 08:00') });
   assert.equal(result.status, 'dry-run');
-  assert.deepEqual(result.messages.map((message) => message.content), ['## 🇺🇸 美股新聞｜2026-11-20（週五）']);
+  assert.deepEqual(result.messages.map((message) => message.content), ['# 股票新聞｜2026-11-20（週五）\n\n## 🇺🇸 美股新聞']);
   assert.deepEqual(posts, [], '預覽不發送');
   const { input, schema } = await codexCall();
   assert.deepEqual(schema.required, ['us']);
