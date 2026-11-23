@@ -37,6 +37,22 @@ test('提示詞依設定寫入時間範圍、兩個市場的篇數與股票優�
   assert.match(prompt, /NVDA、TSLA 每檔股票至少 1 則/);
   assert.match(prompt, /剩下的 3 個名額只放真正重要的新聞，可以是上列股票的第 2 則，或其他個股、美股大盤的新聞/);
   assert.match(prompt, /tw 與 us 之間也不要重複/);
+  const tw = prompt.slice(prompt.indexOf('一、tw：'), prompt.indexOf('二、us：'));
+  const us = prompt.slice(prompt.indexOf('二、us：'), prompt.indexOf('每則新聞的欄位：'));
+  assert.match(tw, /郭哲榮（哲哲）：https:\/\/t\.me\/s\/a178178/);
+  assert.doesNotMatch(tw, /Better Leaf|ARK Invest/);
+  assert.match(us, /Better Leaf 好葉：https:\/\/www\.betterleaf\.co\//);
+  assert.match(us, /https:\/\/www\.youtube\.com\/@betterleaf/);
+  assert.match(us, /ARK Invest：https:\/\/www\.ark-invest\.com\/articles/);
+  assert.match(us, /https:\/\/www\.ark-funds\.com\//);
+  assert.doesNotMatch(us, /郭哲榮|a178178/);
+  assert.match(prompt, /優先來源沒有新內容、無法讀取或與指定股票無關時，改從其他可信來源搜尋/);
+  assert.match(prompt, /以「【觀點】」開頭/);
+  assert.match(prompt, /保留條件與不確定性/);
+  assert.match(prompt, /不要使用來源首頁、頻道列表/);
+  assert.match(prompt, /不以搜尋收錄、頁面擷取時間代替/);
+  assert.match(prompt, /不推測完整解盤內容/);
+  assert.match(prompt, /不得把單日持倉或權重變化推算成買賣/);
   const schema = buildNewsSchema(DEFAULTS);
   assert.deepEqual(schema.required, ['tw', 'us']);
   assert.deepEqual(schema.properties.tw.items.required, ['title', 'summary', 'source', 'url', 'publishedAt', 'stocks']);
@@ -55,10 +71,36 @@ test('篇數設為 0 的市場不搜尋：提示詞與 Schema 都不包含該市
   const usOnly = { ...DEFAULTS, twCount: 0 };
   const prompt = buildNewsPrompt({ ...RANGE, ...usOnly });
   assert.doesNotMatch(prompt, /台股|tw：|2330/);
+  assert.doesNotMatch(prompt, /郭哲榮|a178178/);
   assert.match(prompt, /一、us：美股新聞，最多 3 則/);
   assert.doesNotMatch(prompt, /之間也不要重複/);
   assert.deepEqual(buildNewsSchema(usOnly), { ...buildNewsSchema(DEFAULTS), properties: { us: buildNewsSchema(DEFAULTS).properties.us }, required: ['us'] });
   assert.deepEqual(buildNewsSchema({ ...DEFAULTS, usCount: 0 }).required, ['tw']);
+  assert.doesNotMatch(buildNewsPrompt({ ...RANGE, ...DEFAULTS, usCount: 0 }), /Better Leaf|ARK Invest|betterleaf\.co|ark-invest\.com/);
+});
+
+test('優先來源的觀點與其他來源新聞共用篇數、保留原始出處與單篇連結', () => {
+  const news = parseNews(reply({
+    tw: [item(1, ['2330'], {
+      title: '【觀點】郭哲榮分析台積電供應鏈', summary: '郭哲榮認為需求成長仍須觀察。',
+      source: '郭哲榮（哲哲）', url: 'https://t.me/a178178/12345',
+    }), item(2, ['2330'])],
+    us: [item(3, ['NVDA'], {
+      title: '【觀點】Better Leaf 好葉分析輝達', summary: '好葉指出估值取決於後續成長。',
+      source: 'Better Leaf 好葉', url: 'https://www.betterleaf.co/nvidia-analysis',
+    }), item(4, ['NVDA'], {
+      title: '【觀點】ARK Invest 研究輝達產業需求', summary: 'ARK Invest 預期需求增加，仍有不確定性。',
+      source: 'ARK Invest', url: 'https://www.ark-invest.com/articles/analyst-research/nvidia',
+    }), item(5, ['NVDA'], { source: 'Reuters' }), item(6, ['NVDA'])],
+  }), { twStocks: ['2330'], usStocks: ['NVDA'], twCount: 2, usCount: 3 });
+  assert.equal(news.tw.length, 2);
+  assert.equal(news.us.length, 3);
+  const [tw, us] = buildDiscordMessages(news, { dateLabel: '2026-11-20（週五）' });
+  assert.equal(tw.embeds[0].url, 'https://t.me/a178178/12345');
+  assert.match(tw.embeds[0].footer.text, /郭哲榮（哲哲）/);
+  assert.match(us.embeds[0].title, /【觀點】Better Leaf/);
+  assert.match(us.embeds[1].footer.text, /ARK Invest/);
+  assert.match(us.embeds[2].footer.text, /Reuters/);
 });
 
 test('每個市場依股票清單順序挑選：每檔先選 1 則，代號統一格式，清單外的排最後', () => {

@@ -66,6 +66,10 @@ test('以網路搜尋取得台股與美股新聞，各發一則訊息並記錄�
   assert.deepEqual(schema.required, ['tw', 'us']);
   assert.match(input, /2026-11-19（週四）08:00 ～ 2026-11-20（週五）08:00/);
   assert.match(input, /2330、2317 每檔股票至少 1 則/);
+  assert.match(input, /郭哲榮（哲哲）：https:\/\/t\.me\/s\/a178178/);
+  assert.match(input, /Better Leaf 好葉/);
+  assert.match(input, /ARK Invest/);
+  assert.match(input, /其他可信來源：Reuters/);
 });
 
 test('台股篇數為 0 時只搜尋與發送美股', async (t) => {
@@ -77,6 +81,9 @@ test('台股篇數為 0 時只搜尋與發送美股', async (t) => {
   const { input, schema } = await codexCall();
   assert.deepEqual(schema.required, ['us']);
   assert.doesNotMatch(input, /台股/);
+  assert.doesNotMatch(input, /郭哲榮|a178178/);
+  assert.match(input, /Better Leaf 好葉/);
+  assert.match(input, /ARK Invest/);
 });
 
 test('沒有設定 Webhook 時正式執行拋錯並指出 env/stock.js', async (t) => {
