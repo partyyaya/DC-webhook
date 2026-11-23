@@ -26,5 +26,8 @@
     "signal:webhook": "node src/signal/webhook.js",
     "webhook": "node src/webhook.js",
     "test": "node --test"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "2.6.2"
   }
 }

@@ -67,15 +67,26 @@ async function requestWebhook(webhookUrl, method, messageId, payload, { timeoutM
     url.searchParams.delete('wait');
   }
 
+  // PNG 等附件以 multipart 傳送；沒有附件時保持原本的 JSON 請求。
+  // 每次重試重新建立 FormData，讓 429 重試與多個 Webhook 都可重用同一份二進位資料。
+  const requestBody = () => {
+    if (payload === undefined) return {};
+    const { files = [], ...message } = payload;
+    message.allowed_mentions = NO_MENTIONS;
+    if (files.length === 0) return { headers: { 'content-type': 'application/json' }, body: JSON.stringify(message) };
+    const form = new FormData();
+    message.attachments = [...(message.attachments ?? []), ...files.map((file, index) => ({ id: index, filename: file.name }))];
+    form.set('payload_json', JSON.stringify(message));
+    files.forEach((file, index) => form.set(`files[${index}]`, new Blob([file.data], { type: file.contentType ?? 'application/octet-stream' }), file.name));
+    return { body: form };
+  };
+
   for (let attempt = 1; ; attempt++) {
     let res;
     try {
       res = await fetch(url, {
         method,
-        ...(payload === undefined ? {} : {
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ ...payload, allowed_mentions: NO_MENTIONS }),
-        }),
+        ...requestBody(),
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {

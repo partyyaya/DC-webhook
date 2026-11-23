@@ -87,7 +87,14 @@ process.stdin.setEncoding('utf8').on('data', (chunk) => (input += chunk)).on('en
     const url = new URL(input);
     const json = (body, status = 200) => new Response(JSON.stringify(body), { status });
     if (url.hostname === 'discord.com') {
-      posts.push(JSON.parse(options.body));
+      const form = options.body instanceof FormData ? options.body : null;
+      const payload = JSON.parse(form ? form.get('payload_json') : options.body);
+      if (form) {
+        payload.files = await Promise.all([...form.entries()].filter(([key]) => key.startsWith('files[')).map(async ([, file]) => ({
+          name: file.name, type: file.type, data: Buffer.from(await file.arrayBuffer()),
+        })));
+      }
+      posts.push(payload);
       return json({ id: String(900 + posts.length), channel_id: '333' });
     }
     requests.push(`${url.hostname}${url.pathname}${url.searchParams.get('symbol') ? `?${url.searchParams.get('symbol')}` : ''}`);
@@ -112,12 +119,12 @@ test('取得行情並計算指標，由 AI 判斷是否做單；每個市場一�
   assert.equal((await runOnce({ now: NOW })).status, 'sent');
 
   assert.deepEqual(posts.map((post) => post.content?.split('\n')[0]), [
-    '## 🪙 虛擬貨幣技術分析｜2026-11-20（週五）', '## 🇹🇼 台股技術分析｜2026-11-20（週五）', '## 🇺🇸 美股技術分析｜2026-11-20（週五）', undefined,
+    '# 技術分析｜2026-11-20（週五）', '## 🇹🇼 台股', '## 🇺🇸 美股', undefined,
   ]);
   assert.equal(posts[3].embeds[0].description, '⚠️ **此通知為 AI 自動生成，不構成投資建議**', '免責聲明為最後一張卡片');
   // 紀錄的標題取自訊息文字；只有卡片時取自卡片
   const titles = (await readFile(config.discordMessagesFile, 'utf8')).trim().split('\n').map((line) => JSON.parse(line).title);
-  assert.deepEqual(titles.slice(-2), ['🇺🇸 美股技術分析｜2026-11-20（週五）', '⚠️ 此通知為 AI 自動生成，不構成投資建議']);
+  assert.deepEqual(titles, ['技術分析｜2026-11-20（週五）', '🇹🇼 台股', '🇺🇸 美股', '⚠️ 此通知為 AI 自動生成，不構成投資建議']);
   const [crypto, tw, us] = posts;
   assert.equal(crypto.embeds[0].description, [
     '🏷️ **標的**：**BTC**，**是否做單**：🟢 **做多**', '💰 **進場（現價）**：`97.2`，**風險報酬比**：1:1.9',
@@ -198,4 +205,39 @@ test('預覽模式只印出內容；沒有設定 Webhook 時正式執行拋錯�
 
   config.targets = [];
   await assert.rejects(runOnce({ now: NOW }), /env\/signal\.js 的 webhooks/);
+});
+
+test('各市場的圖片開關獨立生效：指定與 AUTO 的做單卡片附 PNG，觀望維持文字', async (t) => {
+  const { posts } = await setup(t, { markets: {
+    crypto: { auto: false, symbols: ['BTC', 'ETH'], interval: '1d', allowShort: true, includeChart: false },
+    tw: { auto: true, symbols: [], interval: '1d', includeChart: true },
+    us: { auto: false, symbols: ['NVDA'], interval: '1d', includeChart: true },
+  } });
+  await runOnce({ now: NOW });
+  assert.ok(!posts[0].files);
+  assert.ok(!posts[0].embeds[0].image);
+  assert.equal(posts[1].files.length, 1);
+  assert.equal(posts[1].files[0].name, 'signal-tw-2330.png');
+  assert.equal(posts[1].files[0].type, 'image/png');
+  assert.equal(posts[1].embeds[0].image.url, 'attachment://signal-tw-2330.png');
+  assert.equal(posts[1].attachments[0].filename, posts[1].files[0].name);
+  assert.ok(!posts[2].files, '觀望不附圖');
+  assert.ok(!posts[2].embeds[0].image);
+});
+
+test('圖片預覽顯示附件資訊，不列出 PNG 二進位資料；不發送、不寫紀錄', async (t) => {
+  const { posts } = await setup(t, { markets: {
+    crypto: { auto: false, symbols: ['BTC'], interval: '1d', allowShort: true, includeChart: true },
+    tw: { auto: false, symbols: [], interval: '1d' }, us: { auto: false, symbols: [], interval: '1d' },
+  } });
+  const output = [];
+  t.mock.method(console, 'log', (message) => output.push(message));
+  const result = await runOnce({ now: NOW, dryRun: true });
+  assert.equal(result.messages[0].files.length, 1);
+  const preview = JSON.parse(output.find((message) => message.startsWith('[\n')));
+  assert.equal(preview[0].files[0].name, 'signal-crypto-BTC.png');
+  assert.ok(preview[0].files[0].bytes > 0);
+  assert.ok(!preview[0].files[0].data);
+  assert.deepEqual(posts, []);
+  assert.equal(existsSync(config.stateFile), false);
 });

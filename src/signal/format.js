@@ -1,10 +1,12 @@
 /**
  * 組成 Discord 訊息：每個市場一則訊息，每個標的一張卡片（做多為綠色、做空為橘色、觀望為灰色、無法取得資料為紅色），
- * 最後一則訊息是免責聲明卡片。
+ * 共用標題與日期放在第一個市場最上方，最後一則訊息是免責聲明卡片。
  *
  * 訊息標題：
- *   ## 🪙 虛擬貨幣技術分析｜2026-11-20（週五）
- *   -# 🕒 4H 線・💵 價格單位：美元（USDT 交易對）
+ *   # 技術分析｜2026-11-20（週五）
+ *
+ *   ## 🪙 虛擬貨幣
+ *   -# 🕒 日線・💵 價格單位：美元（USDT 交易對）
  *
  * 卡片內容（每行以「圖示 小標題：」開頭，價位以程式碼格式凸顯）：
  *   🏷️ 標的：BTC，是否做單：🟢 做多（做空為 🟠 做空）
@@ -47,13 +49,16 @@ const MAX_EMBEDS = 10;
  * @param {object[]} results parseSignals() 的結果
  * @param {object} options
  * @param {string} options.dateLabel 標題中的日期，例如「2026-11-20（週五）」
+ * @param {Map} [options.charts] 以「市場:代號」索引的 PNG 附件
  * @returns {object[]}
  */
-export function buildDiscordMessages(results, { dateLabel }) {
-  return [...results.map((market) => buildMarketMessage(market, dateLabel)), DISCLAIMER_MESSAGE];
+export function buildDiscordMessages(results, { dateLabel, charts = new Map() }) {
+  const messages = results.map((market) => buildMarketMessage(market, charts));
+  if (messages.length > 0) messages[0].content = `# 技術分析｜${dateLabel}\n\n${messages[0].content}`;
+  return [...messages, DISCLAIMER_MESSAGE];
 }
 
-function buildMarketMessage(market, dateLabel) {
+function buildMarketMessage(market, charts) {
   const info = marketOf(market.key);
   const autoSignals = market.autoSignals ?? [];
   const notes = [`🕒 ${INTERVALS[market.interval].label}`, `💵 價格單位：${info.unitNote}`];
@@ -81,7 +86,21 @@ function buildMarketMessage(market, dateLabel) {
     // 與指定代號混用時，在標的後面標示（AUTO），與指定的代號區分
     embeds.push(...autoSignals.map((signal) => signalEmbed(signal, info, { autoTag: market.mixed })));
   }
-  return { content: `## ${info.heading}技術分析｜${dateLabel}\n-# ${notes.join('・')}`, embeds: embeds.slice(0, MAX_EMBEDS) };
+  const visibleEmbeds = embeds.slice(0, MAX_EMBEDS);
+  const files = [];
+  for (const signal of [...market.signals, ...autoSignals]) {
+    const chart = charts.get(`${market.key}:${signal.symbol}`);
+    if (!market.includeChart || signal.action !== 'trade' || !chart) continue;
+    // 以標的順序對應卡片，避免行情錯誤卡片造成 AUTO 的圖片放錯位置。
+    const index = market.signals.includes(signal) ? market.signals.indexOf(signal) : market.signals.length + market.errors.length + autoSignals.indexOf(signal);
+    if (!visibleEmbeds[index]) continue;
+    visibleEmbeds[index].image = { url: `attachment://${chart.name}` };
+    files.push(chart);
+  }
+  return {
+    content: `## ${info.heading}\n-# ${notes.join('・')}`, embeds: visibleEmbeds,
+    ...(files.length > 0 ? { files } : {}),
+  };
 }
 
 /** 單一標的的卡片。 */

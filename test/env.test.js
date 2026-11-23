@@ -242,7 +242,7 @@ test('股票設定錯誤明確指出設定檔與欄位名稱', async (t) => {
 });
 
 test('技術指標設定檔為空時使用預設值：每天 09:10～22:40 每 60 分鐘、台灣時間、三個市場各 2 個代號的日線、可以做空、不使用網路搜尋', async (t) => {
-  const daily = (symbols) => ({ auto: false, symbols, interval: '1d', allowShort: true });
+  const daily = (symbols) => ({ auto: false, symbols, interval: '1d', allowShort: true, includeChart: false });
   assert.deepEqual(await readConfig(t, 'signal', {}), {
     targets: [], state: path.join(ROOT, 'data/signal/state.json'), posts: path.join(ROOT, 'data/signal/discord-messages.jsonl'),
     days: [0, 1, 2, 3, 4, 5, 6], start: 550, end: 1360, interval: 60, timeZone: 'Asia/Taipei', timeout: 600000,
@@ -257,7 +257,7 @@ export default {
   schedule: { days: '1-5', start: '09:00', end: '21:00', intervalMinutes: 60, timeZone: 'UTC' },
   markets: {
     crypto: { symbols: 'btc, ETHUSDT' },
-    tw: { symbols: 'auto', allowShort: false },
+    tw: { symbols: 'auto', allowShort: false, includeChart: true },
     us: { symbols: [] },
   },
   aiTimeoutMs: 120000,
@@ -268,31 +268,58 @@ export default {
     state: path.join(ROOT, 'data/signal/custom-state.json'), posts: path.join(ROOT, 'data/signal/custom-posts.jsonl'),
     days: [1, 2, 3, 4, 5], start: 540, end: 1260, interval: 60, timeZone: 'UTC', timeout: 120000,
     markets: {
-      crypto: { auto: false, symbols: ['BTC', 'ETH'], interval: '1d', allowShort: true },
-      tw: { auto: true, symbols: [], interval: '1d', allowShort: false },
-      us: { auto: false, symbols: [], interval: '1d', allowShort: true },
+      crypto: { auto: false, symbols: ['BTC', 'ETH'], interval: '1d', allowShort: true, includeChart: false },
+      tw: { auto: true, symbols: [], interval: '1d', allowShort: false, includeChart: true },
+      us: { auto: false, symbols: [], interval: '1d', allowShort: true, includeChart: false },
     },
     webSearch: false,
   });
 });
 
+test('技術指標 symbols 的空字串與純空白會略過，全空視為停用而非使用預設代號', async (t) => {
+  for (const empty of ['', ' \t\n ', ', ,\t,,', [], [''], ['', '  ', '\t\n']]) {
+    const { markets } = await readConfig(t, 'signal', { markets: {
+      crypto: { symbols: ['', ' btc ', ' ', 'ETHUSDT', '', ' AUTO ', '\t'] },
+      tw: { symbols: empty, includeChart: true },
+      us: { symbols: empty },
+    } });
+    assert.deepEqual(markets.crypto.symbols, ['BTC', 'ETH']);
+    assert.equal(markets.crypto.auto, true);
+    for (const key of ['tw', 'us']) {
+      assert.deepEqual(markets[key].symbols, []);
+      assert.equal(markets[key].auto, false);
+    }
+  }
+  const { markets } = await readConfig(t, 'signal', { markets: {
+    crypto: { symbols: ['', '  '] }, tw: { symbols: [' ', 'AUTO', ''] }, us: { symbols: '' },
+  } });
+  assert.deepEqual(markets.crypto.symbols, []);
+  assert.equal(markets.crypto.auto, false);
+  assert.deepEqual(markets.tw.symbols, []);
+  assert.equal(markets.tw.auto, true);
+});
+
 test('技術指標的代號可以與 AUTO 混用；超過 10 個時依填寫順序取前 10 個（AUTO 也算 1 個）', async (t) => {
   const letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'];
   const { markets } = await readConfig(t, 'signal', { markets: { crypto: { symbols: ['BTC', 'AUTO'] }, us: { symbols: [...letters.slice(0, 9), 'AUTO', 'K'] } } });
-  assert.deepEqual(markets.crypto, { auto: true, symbols: ['BTC'], interval: '1d', allowShort: true });
-  assert.deepEqual(markets.us, { auto: true, symbols: letters.slice(0, 9), interval: '1d', allowShort: true });
+  assert.deepEqual(markets.crypto, { auto: true, symbols: ['BTC'], interval: '1d', allowShort: true, includeChart: false });
+  assert.deepEqual(markets.us, { auto: true, symbols: letters.slice(0, 9), interval: '1d', allowShort: true, includeChart: false });
   assert.deepEqual((await readConfig(t, 'signal', { markets: { us: { symbols: [...letters, 'AUTO'] } } })).markets.us,
-    { auto: false, symbols: letters.slice(0, 10), interval: '1d', allowShort: true });
+    { auto: false, symbols: letters.slice(0, 10), interval: '1d', allowShort: true, includeChart: false });
 });
 
 test('技術指標設定錯誤明確指出設定檔與欄位名稱', async (t) => {
   const none = { symbols: [] };
   const cases = [
     [{ markets: { crypto: none, tw: none, us: none } }, 'markets 至少要有一個市場的 symbols 填寫代號或 AUTO'],
+    [{ markets: { crypto: { symbols: '' }, tw: { symbols: [' ', ''] }, us: { symbols: '\t' } } }, 'markets 至少要有一個市場的 symbols 填寫代號或 AUTO'],
     [{ markets: { tw: { symbols: [50] } } }, '0 開頭的代號（例如 0050）請加引號'],
     [{ markets: { us: { symbols: ['蘋果'] } } }, 'markets.us.symbols 格式錯誤'],
     [{ markets: { us: { symbols: ['NVDA'], interval: '4h' } } }, 'markets.us 有不支援的欄位：interval'],
     [{ markets: { crypto: { allowShort: 'yes' } } }, 'markets.crypto.allowShort 必須是 true 或 false'],
+    [{ markets: { crypto: { includeChart: 'true' } } }, 'markets.crypto.includeChart 必須是 true 或 false'],
+    [{ markets: { tw: { includeChart: 1 } } }, 'markets.tw.includeChart 必須是 true 或 false'],
+    [{ markets: { us: { includeChart: null } } }, 'markets.us.includeChart 必須是 true 或 false'],
     [{ markets: { crypto: 'AUTO' } }, 'markets.crypto 必須是物件'],
     [{ markets: { gold: none } }, 'markets 有不支援的欄位：gold'],
     [{ markets: { crypto: { symbol: ['BTC'] } } }, 'markets.crypto 有不支援的欄位：symbol'],

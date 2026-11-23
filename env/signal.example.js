@@ -61,11 +61,13 @@ export default {
   //   代號與 'AUTO' 可以混用，例如 ['BTC', 'ETH', 'AUTO']：指定的代號都會分析，AUTO 另外挑選清單以外的標的；
   //   一個市場最多 10 張卡片，AUTO 也算 1 個，超過 10 個時只取前 10 個；
   //   AUTO 挑選的數量為剩下的名額（指定 8 個時最多 2 個、9 個時最多 1 個）；
-  //   留空（[]）代表不分析這個市場，三個市場不能都留空。
+  //   空字串（''）與純空白項目會自動略過、不占名額，例如 ['BTC', '', ' '] 只分析 BTC；
+  //   留空（[]、'' 或 ['', ' ']）代表不分析這個市場，三個市場不能都留空。
   // 每個市場的 allowShort：是否可以做空（true／false），預設 true；false 時只做多或觀望。能否放空的確認方式：
   //   crypto  Binance、Bybit、Bitget 任一家有 USDT 永續合約（沒有的幣只能做多，例如 SNEK）
   //   tw      證交所、櫃買中心的融資融券資料中可融券（融券限額大於 0 且未停止融券）
   //   us      沒有免費資料可確認，做空前請自行確認券商可借券
+  // 每個市場的 includeChart：是否替可做單的標的附上蠟燭圖與所有指標的圖片解說（true／false），預設 false；觀望不附圖。
   // AUTO 的候選：
   //   crypto  24 小時成交額最大的 15 個 USDT 交易對（排除穩定幣）
   //   tw      前一交易日成交金額最大的 15 檔上市櫃普通股（不含 ETF）
@@ -76,16 +78,19 @@ export default {
     crypto: {
       symbols: ['BTC', 'ETH'], // 幣種代號，大小寫不拘；寫成 'BTCUSDT' 也可以
       allowShort: true, // 是否可以做空（USDT 永續合約 1 倍）
+      includeChart: false, // 是否附上可做單標的的圖片解說
     },
     // 台股（上市、上櫃），價格單位為新台幣；K 線來自 Yahoo Finance
     tw: {
       symbols: ['2330', '2345'], // 台股代號；0 開頭的代號（例如 '0050'）一定要加引號
       allowShort: true, // 是否可以做空（融券）
+      includeChart: false, // 是否附上可做單標的的圖片解說
     },
     // 美股，價格單位為美元；K 線來自 Yahoo Finance
     us: {
       symbols: ['NVDA', 'AAPL'], // 美股代號，大小寫不拘；類別股寫 'BRK.B'
       allowShort: true, // 是否可以做空（融券，需保證金帳戶）
+      includeChart: false, // 是否附上可做單標的的圖片解說
     },
   },
 

@@ -17,7 +17,7 @@
 
 ## 環境設置
 
-需要 Node.js 20.12 以上，專案使用 Node 22，沒有 npm 套件依賴。自動產生摘要時需要 Codex CLI 或 Claude Code CLI 其中一個（由 `AI_PROVIDER` 選擇，預設 Codex）；只使用手動 Webhook 工具時都不需要。
+需要 Node.js 20.12 以上，專案使用 Node 22。技術分析的圖片解說使用 `@resvg/resvg-js` 將 SVG 轉成 PNG，先執行 `npm ci` 安裝套件；其他功能不需載入繪圖套件。自動產生摘要時需要 Codex CLI 或 Claude Code CLI 其中一個（由 `AI_PROVIDER` 選擇，預設 Codex）；只使用手動 Webhook 工具時都不需要。
 
 ### Node.js 與 AI CLI
 
@@ -25,6 +25,7 @@
 
 ```bash
 nvm use
+npm ci
 
 # 使用 Codex（預設）
 npm install -g @openai/codex

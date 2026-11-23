@@ -20,10 +20,10 @@ const schedule = section(settings.schedule, ['days', 'start', 'end', 'intervalMi
 const marketSettings = section(settings.markets, MARKETS.map((market) => market.key), at('markets'));
 const files = section(settings.files, ['state', 'discordMessages'], at('files'));
 
-// 每個市場的標的（代號清單或 AUTO；空的代表不分析）與是否可以做空；K 線固定使用日線
+// 每個市場的標的、是否可以做空與是否附上圖片解說；K 線固定使用日線
 const markets = Object.fromEntries(MARKETS.map((market) => {
   const where = at(`markets.${market.key}`);
-  const value = section(marketSettings[market.key], ['symbols', 'allowShort'], where);
+  const value = section(marketSettings[market.key], ['symbols', 'allowShort', 'includeChart'], where);
   const symbolsKey = `${where}.symbols`;
   // 超過 MAX_SYMBOLS 個時只取前面的，略過的在終端機提醒
   const { dropped, ...parsed } = parseMarketSymbols(market.key, listText(value.symbols, market.defaultSymbols, symbolsKey), symbolsKey);
@@ -32,6 +32,7 @@ const markets = Object.fromEntries(MARKETS.map((market) => {
     ...parsed,
     interval: SIGNAL_INTERVAL,
     allowShort: boolean(value.allowShort, true, `${where}.allowShort`),
+    includeChart: boolean(value.includeChart, false, `${where}.includeChart`),
   }];
 }));
 if (!Object.values(markets).some(isMarketEnabled)) {

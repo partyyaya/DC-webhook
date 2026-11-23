@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildDiscordMessages, DISCLAIMER, DISCLAIMER_MESSAGE, NO_PICK_TEXT } from '../../src/signal/format.js';
 import { analyzeCandles } from '../../src/signal/indicators.js';
-import { autoPickLimit, parseMarketSymbols, tickSize, tradingCosts } from '../../src/signal/markets.js';
+import { autoPickLimit, isMarketEnabled, parseMarketSymbols, tickSize, tradingCosts } from '../../src/signal/markets.js';
 import {
   buildSignalPrompt, buildSignalSchema, formatPrice, NOTE_MAX, parseSignals, REASON_MAX, riskReward, roundPrice,
 } from '../../src/signal/signals.js';
@@ -45,6 +45,23 @@ test('標的清單：代號統一格式、AUTO 不分大小寫且可以與代號
 
   // AUTO 最多挑選的數量：剩下的卡片名額，最多 3 個
   assert.deepEqual([0, 7, 8, 9, 10].map(autoPickLimit), [3, 3, 2, 1, 0]);
+});
+
+test('標的清單略過空字串與空白，不占名額；全部為空時停用市場', () => {
+  for (const key of ['crypto', 'tw', 'us']) {
+    for (const symbols of ['', '  ', '\t\n', ', ,\t,\n,', ',,,']) {
+      const parsed = parseMarketSymbols(key, symbols, `markets.${key}.symbols`);
+      assert.deepEqual(parsed, { auto: false, symbols: [], dropped: [] });
+      assert.equal(isMarketEnabled(parsed), false);
+    }
+  }
+  assert.deepEqual(parseMarketSymbols('crypto', ', btc, ,\t, ETHUSDT,,auto, ', 'x'), {
+    auto: true, symbols: ['BTC', 'ETH'], dropped: [],
+  });
+  const symbols = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'AUTO', 'K'];
+  assert.deepEqual(parseMarketSymbols('us', symbols.flatMap((symbol) => ['', ' ', symbol]).join(','), 'x'), {
+    auto: true, symbols: symbols.slice(0, 9), dropped: ['K'],
+  });
 });
 
 test('價格依現價的大小保留約 5 位有效數字', () => {
@@ -263,7 +280,7 @@ test('回覆不是 JSON 或缺少有資料的市場時拋錯；沒有資料的�
   assert.equal(us.failure, '無法取得 AUTO 的候選標的：HTTP 500');
 });
 
-test('Discord 訊息：每個市場一則，標題註明 K 線週期與價格單位；可以做單時列出進場方式、風險報酬比、止盈、止損；卡片底部都顯示現價；最後一則為免責聲明', () => {
+test('Discord 訊息：共用標題日期只在最上方顯示一次，各市場註明 K 線週期與價格單位；可以做單時列出價位，最後一則為免責聲明', () => {
   const plan = [
     market('crypto', [item('BTC', 62000), item('ETH', 1750)], { errors: [{ symbol: 'NOTACOIN', message: '無法取得 NOTACOINUSDT 的 K 線' }] }),
     market('tw', [], { auto: true, candidates: 15, autoItems: [item('2330', 2000, { name: '台積電', source: 'Yahoo Finance', ticker: '2330.TW' })] }),
@@ -282,7 +299,8 @@ test('Discord 訊息：每個市場一則，標題註明 K 線週期與價格單
   assert.equal(DISCLAIMER, '此通知為 AI 自動生成，不構成投資建議');
 
   const [crypto, tw, us] = messages;
-  assert.equal(crypto.content, `## 🪙 虛擬貨幣技術分析｜${DATE}\n-# 🕒 日線・💵 價格單位：美元（USDT 交易對）`);
+  assert.equal(crypto.content, `# 技術分析｜${DATE}\n\n## 🪙 虛擬貨幣\n-# 🕒 日線・💵 價格單位：美元（USDT 交易對）`);
+  assert.equal(messages.filter((message) => message.content?.includes(DATE)).length, 1);
   assert.deepEqual(crypto.embeds[0], {
     description: [
       '🏷️ **標的**：**BTC**，**是否做單**：🟢 **做多**',
@@ -299,12 +317,12 @@ test('Discord 訊息：每個市場一則，標題註明 K 線週期與價格單
   assert.equal(crypto.embeds[1].footer.text, '現價 1750 美元・資料來源：Binance ETHUSDT');
   assert.deepEqual(crypto.embeds[2], { description: '🏷️ **標的**：**NOTACOIN**\n❌ **原因**：無法取得行情資料，本次略過：無法取得 NOTACOINUSDT 的 K 線', color: 0xe74c3c });
 
-  assert.equal(tw.content, `## 🇹🇼 台股技術分析｜${DATE}\n-# 🕒 日線・💵 價格單位：新台幣・🤖 AUTO：從上市櫃普通股中前一交易日成交金額最大的 15 個標的中篩選出趨勢向上的 1 個，由 AI 挑選最多 3 個`);
+  assert.equal(tw.content, '## 🇹🇼 台股\n-# 🕒 日線・💵 價格單位：新台幣・🤖 AUTO：從上市櫃普通股中前一交易日成交金額最大的 15 個標的中篩選出趨勢向上的 1 個，由 AI 挑選最多 3 個');
   assert.match(tw.embeds[0].description,
     /^🏷️ \*\*標的\*\*：\*\*2330 台積電\*\*，\*\*是否做單\*\*：🟢 \*\*做多\*\*\n💰 \*\*進場（限價・待觸發）\*\*：`1985`，\*\*風險報酬比\*\*：1:1\.5\n🎯 \*\*止盈\*\*：`2150`（\+8\.3%），\*\*止損\*\*：`1900`（-4\.3%）\n/);
   assert.equal(tw.embeds[0].footer.text, '現價 2000 新台幣・資料來源：Yahoo Finance 2330.TW');
 
-  assert.equal(us.content, `## 🇺🇸 美股技術分析｜${DATE}\n-# 🕒 日線・💵 價格單位：美元`);
+  assert.equal(us.content, '## 🇺🇸 美股\n-# 🕒 日線・💵 價格單位：美元');
   assert.deepEqual(us.embeds, [{ description: '❌ **美股 AUTO**：無法取得 AUTO 的候選標的：HTTP 500，本次略過。', color: 0xe74c3c }]);
 
   // 做空：橘色卡片，止盈為下跌、止損為上漲
@@ -322,6 +340,7 @@ test('Discord 訊息：每個市場一則，標題註明 K 線週期與價格單
   });
 
   const [noPick] = buildDiscordMessages(parseSignals(reply({ tw: [] }), [plan[1]]), { dateLabel: DATE });
+  assert.ok(noPick.content.startsWith(`# 技術分析｜${DATE}\n\n## 🇹🇼 台股\n`), '只分析台股時，共用標題仍在最上方');
   assert.deepEqual(noPick.embeds, [{ description: `💤 ${NO_PICK_TEXT}`, color: 0x95a5a6 }]);
   assert.equal(NO_PICK_TEXT, '目前沒有符合做單條件的標的，或市場不適合做單，建議觀望。');
 });

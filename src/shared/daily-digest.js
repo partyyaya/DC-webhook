@@ -108,7 +108,11 @@ export function createDailyDigest({ topic, config, collect, subject = '新聞', 
     if (dryRun) {
       log(`--dry-run：不刪除、不發送 Discord、不更新紀錄。共 ${config.targets.length} 個 Webhook，正式執行時每個 Webhook 先刪除自己前一次的${subject}訊息，再發送 ${messages.length} 則訊息：`);
       for (const target of config.targets) log(`  ${describeTarget(target)}：將刪除 ${targetEntry(state, target.webhookId).messageIds.length} 則`);
-      console.log(JSON.stringify(messages, null, 2));
+      // 預覽列出附件名稱、格式與大小，不把整張 PNG 的二進位資料印到終端機。
+      console.log(JSON.stringify(messages.map(({ files, ...message }) => ({
+        ...message,
+        ...(files?.length ? { files: files.map(({ data, ...file }) => ({ ...file, bytes: data.byteLength })) } : {}),
+      })), null, 2));
       return { status: 'dry-run', state, news, messages };
     }
 

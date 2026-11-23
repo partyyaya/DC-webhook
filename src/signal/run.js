@@ -10,6 +10,7 @@
  * index.js（單次執行）與 scheduler.js（常駐排程）都是呼叫這裡的 runOnce()。
  */
 import { config } from './config.js';
+import { buildSignalCharts } from './chart.js';
 import { buildDiscordMessages } from './format.js';
 import { prepareMarkets } from './market-data.js';
 import { INTERVALS, isMarketEnabled, MARKETS, marketOf } from './markets.js';
@@ -74,7 +75,8 @@ export const { assertTargets, runDaily: runOnce } = createDailyDigest({
       if (market.auto && !market.failure && market.autoSignals.length === 0) log(`  [${name} AUTO] 沒有符合做單條件的標的`);
     }
 
-    // 步驟 3：組成 Discord 訊息（所有 Webhook 共用同一份內容）
-    return { news: results, messages: buildDiscordMessages(results, { dateLabel: formatDateInZone(to, timeZone) }) };
+    // 步驟 3：按各市場開關替已通過檢查的做單標的繪圖；所有 Webhook 共用同一份內容與圖片
+    const charts = await buildSignalCharts(results, plan, { now: to, timeZone });
+    return { news: results, messages: buildDiscordMessages(results, { dateLabel: formatDateInZone(to, timeZone), charts }) };
   },
 });

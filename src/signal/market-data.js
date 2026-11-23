@@ -468,14 +468,14 @@ async function mapLimit(items, limit, fn) {
  * 指定代號與 AUTO 可以混用：指定的代號都交給 AI 判斷；AUTO 從候選中排除已指定的代號，
  * 只把趨勢明確的候選交給 AI 挑選，最多 autoLimit 個（不超過剩下的卡片名額）。
  *
- * @param {object} markets 設定檔的市場設定：{crypto, tw, us}，每個為 {auto, symbols, interval, allowShort}
+ * @param {object} markets 設定檔的市場設定：{crypto, tw, us}，每個為 {auto, symbols, interval, allowShort, includeChart}
  * @param {object} options
  * @param {number} options.now 目前時間（毫秒）
  * @param {number} [options.timeoutMs] 每個請求的逾時時間
  * @returns {Promise<object[]>} 每個市場：
  *   items      指定代號中成功取得資料的標的（每個都要 AI 回覆）
  *   autoItems  AUTO 中通過趨勢篩選的候選（由 AI 挑選）
- *   標的格式為 {symbol, name, source, ticker, adjusted, price, priceTime, shortable, snapshot}；
+ *   標的格式為 {symbol, name, source, ticker, adjusted, price, priceTime, shortable, snapshot}；includeChart 時另外保留 candles 繪圖
  *   shortable 為能否放空：true／false，無法確認時為 null，不可做空的市場為 false
  *   errors     指定代號中無法取得資料的 {symbol, message}（會顯示在 Discord）
  *   failure    AUTO 無法取得候選標的、或所有候選都失敗時的原因（會顯示在 Discord）
@@ -495,9 +495,9 @@ export async function prepareMarkets(markets, { now, timeoutMs }) {
 
   const result = [];
   for (const market of enabled) {
-    const { auto, symbols, interval, allowShort = false } = markets[market.key];
+    const { auto, symbols, interval, allowShort = false, includeChart = false } = markets[market.key];
     const entry = {
-      key: market.key, interval, auto, allowShort, mixed: auto && symbols.length > 0, autoLimit: auto ? autoPickLimit(symbols.length) : 0,
+      key: market.key, interval, auto, allowShort, includeChart, mixed: auto && symbols.length > 0, autoLimit: auto ? autoPickLimit(symbols.length) : 0,
       candidates: 0, loaded: 0, items: [], autoItems: [], errors: [], failure: null,
     };
     result.push(entry);
@@ -524,7 +524,10 @@ export async function prepareMarkets(markets, { now, timeoutMs }) {
           if (lastTime !== undefined && now - lastTime > STALE_DAYS[market.key] * 24 * 60 * 60 * 1000) {
             throw new Error(`最後一根已收盤 K 線為 ${new Date(lastTime).toISOString().slice(0, 10)}，資料可能已停止更新`);
           }
-          return { item: { symbol: target.symbol, name: target.name ?? '', ...rest, shortable: canShort(target.symbol), snapshot: analyzeCandles(candles) } };
+          return { item: {
+            symbol: target.symbol, name: target.name ?? '', ...rest, shortable: canShort(target.symbol), snapshot: analyzeCandles(candles),
+            ...(includeChart ? { candles } : {}),
+          } };
         } catch (err) {
           logError(`[${market.name} ${target.symbol}] ${err.message}`);
           return { error: { symbol: target.symbol, message: err.message } };

@@ -49,6 +49,35 @@ async function seedHistory(file, count) {
 
 const readEvents = async file => (await readFile(file, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
 
+test('PNG 附件以 multipart 上傳，停用提及且 429 重試能重用完整圖片', async (t) => {
+  const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const bodies = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(options.headers, undefined, 'FormData 自動設定含 boundary 的 Content-Type');
+    assert.ok(options.body instanceof FormData);
+    assert.equal(new URL(url).searchParams.get('wait'), 'true');
+    const payload = JSON.parse(options.body.get('payload_json'));
+    assert.deepEqual(payload.allowed_mentions, { parse: [] });
+    assert.equal(payload.files, undefined);
+    assert.deepEqual(payload.attachments, [{ id: 0, filename: 'chart.png' }]);
+    const file = options.body.get('files[0]');
+    assert.equal(file.name, 'chart.png');
+    assert.equal(file.type, 'image/png');
+    assert.deepEqual(Buffer.from(await file.arrayBuffer()), bytes);
+    bodies.push(options.body);
+    return bodies.length === 1 ? json({ retry_after: 0 }, 429) : json({ id: MESSAGE_ID });
+  });
+  const payload = {
+    embeds: [{ image: { url: 'attachment://chart.png' } }], allowed_mentions: { parse: ['everyone'] },
+    files: [{ name: 'chart.png', contentType: 'image/png', data: bytes }],
+  };
+  assert.equal((await sendToDiscord(HOOK, payload)).id, MESSAGE_ID);
+  assert.equal(bodies.length, 2);
+  assert.notEqual(bodies[0], bodies[1]);
+  assert.equal((await sendToDiscord(HOOK, payload)).id, MESSAGE_ID, '相同附件可再次傳送到其他 Webhook');
+  assert.deepEqual(payload.allowed_mentions, { parse: ['everyone'] }, '傳送時不修改原本共用的 payload');
+});
+
 test('新增、修改、刪除使用正確 HTTP 路徑，並保存 ID 及最後狀態，不保存 token', async (t) => {
   const fixture = await setup(t);
   const { run, calls, historyFile } = fixture;

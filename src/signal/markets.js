@@ -142,7 +142,8 @@ export const marketOf = (key) => MARKETS.find((market) => market.key === key);
 export const isMarketEnabled = (market) => market.auto || market.symbols.length > 0;
 
 /**
- * 解析市場的標的清單：逗號分隔的代號、AUTO，或兩者混用（例如 BTC,ETH,AUTO）；可以是空的（不分析該市場）。
+ * 解析市場的標的清單：逗號分隔的代號、AUTO，或兩者混用（例如 BTC,ETH,AUTO）。
+ * 空字串與純空白項目會略過、不占名額；全部為空時不分析該市場。
  * 重複的代號只保留第一次。超過 MAX_SYMBOLS 個時依填寫順序只取前 MAX_SYMBOLS 個（AUTO 也算 1 個），
  * 其餘放在 dropped，例如 9 個代號加上 AUTO 時 AUTO 挑選 1 個；10 個代號後面的 AUTO 會被略過。
  *
