@@ -97,8 +97,10 @@ export function buildShopMessages(announcement, { products, otherChanges }, kind
   // 每個商品先圖片、再文字；購買條件、可購買次數與販售時間依序放在文字卡片最後
   const groups = products.map((product) => {
     const descriptionLimit = DESCRIPTION_LIMIT;
+    const contents = product.contents.map(value => value.trim())
+      .filter(value => value && value !== '公告未列出');
     const lines = [
-      `- **內容物：**${product.contents.length > 0 ? product.contents.join('、') : '公告未列出'}`,
+      ...(contents.length > 0 ? [`- **內容物：**${contents.join('、')}`] : []),
       ...product.links.map((link) => `[${link.text.replace(/[[\]]/g, '')}](${link.url})`),
     ];
     const purchaseDetails = truncate([
@@ -109,12 +111,13 @@ export function buildShopMessages(announcement, { products, otherChanges }, kind
       .filter(([, value]) => typeof value === 'string' && value.trim() && value.trim() !== '公告未註明')
       .map(([label, value]) => `- **${label}：**${value.trim()}`)
       .join('\n'), descriptionLimit - 2);
-    const suffix = purchaseDetails ? `\n${purchaseDetails}` : '';
+    const suffix = purchaseDetails ? `${lines.length > 0 ? '\n' : ''}${purchaseDetails}` : '';
+    const description = `${truncate(lines.join('\n'), descriptionLimit - suffix.length)}${suffix}`;
     const textEmbed = {
       color: EMBED_COLOR,
       title: truncate(`${product.name}｜${product.price}`, TITLE_LIMIT),
       // 預留購買資訊的空間，避免內容物太長時把它們截掉
-      description: `${truncate(lines.join('\n'), descriptionLimit - suffix.length)}${suffix}`,
+      ...(description ? { description } : {}),
     };
     return product.image ? [{ color: EMBED_COLOR, image: { url: product.image } }, textEmbed] : [textEmbed];
   });

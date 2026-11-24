@@ -143,6 +143,28 @@ test('購物商場：購買資訊只顯示有內容的項目並放在連結後�
     '- **內容物：**突襲額外入場券、凍結加持器\n[說明](https://artale.live/tw/guide/pass)\n- **販售時間：**11/17～11/24');
 });
 
+test('購物商場：未列出內容物時省略該行，保留圖片、連結與購買資訊且沒有開頭空行', () => {
+  for (const contents of [[], ['公告未列出'], [' ', ' 公告未列出 ']]) {
+    const item = { ...product('單一道具', 'https://cdn.example/item.webp', [
+      { text: '說明', url: 'https://artale.live/tw/guide/item' },
+    ]), contents, salePeriod: '11/24～12/1' };
+    const [{ embeds }] = buildShopMessages(shopAnnouncement, { products: [item], otherChanges: [] }, 'new');
+    assert.equal(embeds[1].image.url, item.image);
+    assert.equal(embeds[2].description, '[說明](https://artale.live/tw/guide/item)\n- **販售時間：**11/24～12/1');
+    const [{ embeds: withoutLinks }] = buildShopMessages(shopAnnouncement,
+      { products: [{ ...item, image: null, links: [] }], otherChanges: [] }, 'new');
+    assert.equal(withoutLinks[1].description, '- **販售時間：**11/24～12/1');
+  }
+});
+
+test('購物商場：單一道具沒有其他說明時仍保留商品卡片', () => {
+  const [{ embeds }] = buildShopMessages(shopAnnouncement,
+    { products: [{ ...product('單一道具'), contents: [] }], otherChanges: [] }, 'new');
+  assert.equal(embeds[1].title, '單一道具｜4,000 WC');
+  assert.equal(embeds[1].description, undefined);
+  assert.ok(embeds[1].footer);
+});
+
 test('購物商場：超過 10 張卡片時拆成多則訊息，且同一商品的圖片與文字不會被拆開', () => {
   const products = Array.from({ length: 8 }, (_, i) => product(`禮包${i + 1}`, `https://cdn.example/${i + 1}.webp`));
   const messages = buildShopMessages(shopAnnouncement, { products, otherChanges: [] }, 'new');
